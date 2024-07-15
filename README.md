@@ -22,7 +22,10 @@ cd MapsTorch
 
 A Python environment is needed. `conda` is recommended
 
-```conda env create -f env.yml ```
+```
+conda env create -f env.yml
+conda activate mapstorch
+```
 
 ## Prepare data
 The input files are HDF5 files produced by XRFMaps, it should at least contain the spectra volume information.
