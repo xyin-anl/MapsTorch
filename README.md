@@ -16,7 +16,7 @@ The MAPS algorithm [3] and the XRF-Maps software [4] are currently utilized at t
 ## Setup environment
 Please download/clone this repository and enter the directory
 ```
-git clone 
+git clone https://github.com/xyin-anl/MapsTorch.git
 cd MapsTorch
 ```
 
