@@ -149,7 +149,7 @@ def fit_spec(
     fitting_params=default_fitting_params,
     init_param_vals=default_param_vals,
     fixed_param_vals={},
-    target_ranges=None,
+    indices=None,
     tune_params=True,
     init_amp=True,
     use_snip=True,
@@ -170,12 +170,6 @@ def fit_spec(
         print("CUDA is not available, using CPU instead")
 
     torch.cuda.empty_cache()
-
-    if target_ranges is not None:
-        indices = set()
-        for rg in target_ranges:
-            indices.update(rg)
-        indices = list(indices)
 
     tensors, opt_configs = create_tensors(
         elems_to_fit=elements_to_fit,
@@ -234,7 +228,7 @@ def fit_spec(
         )
         loss_val = (
             loss(spec_fit + bkg, int_spec_tensor)
-            if target_ranges is None
+            if indices is None
             else loss(spec_fit[indices] + bkg[indices], int_spec_tensor[indices])
         )
         loss_trace.append(loss_val.item())
@@ -253,7 +247,7 @@ def fit_spec_vol(
     fitting_params=default_fitting_params,
     init_param_vals=default_param_vals,
     fixed_param_vals={},
-    target_ranges=None,
+    indices=None,
     tune_params=True,
     init_amp=True,
     use_snip=True,
@@ -274,12 +268,6 @@ def fit_spec_vol(
         print("CUDA is not available, using CPU instead")
 
     torch.cuda.empty_cache()
-
-    if target_ranges is not None:
-        indices = set()
-        for rg in target_ranges:
-            indices.update(rg)
-        indices = list(indices)
 
     tensors, opt_configs = create_tensors(
         elems_to_fit=elements_to_fit,
@@ -345,7 +333,7 @@ def fit_spec_vol(
         )
         loss_vol = (
             loss(spec_fit + bkg, spec_vol_tensor)
-            if target_ranges is None
+            if indices is None
             else loss(
                 spec_fit[..., indices] + bkg[..., indices],
                 spec_vol_tensor[..., indices]
