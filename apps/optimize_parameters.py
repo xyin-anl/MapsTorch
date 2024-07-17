@@ -264,8 +264,13 @@ def __(fitted_tensors, mo, params_record):
 @app.cell
 def __(mo):
     load_params_button = mo.ui.button(label='Load selected parameters')
-    load_params_button.right()
     return load_params_button,
+
+
+@app.cell
+def __(load_params_button, results_shown):
+    load_params_button.right() if results_shown else None
+    return
 
 
 @app.cell
