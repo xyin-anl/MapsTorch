@@ -144,7 +144,7 @@ def __(
 def __(configs, elem_selection, mo, param_selection):
     control_panel = mo.accordion({'Elements': elem_selection,
                            'Parameters': param_selection,
-                           'Configs': configs})
+                           'Configs': configs}, multiple=True)
     control_panel_shown = True
     control_panel
     return control_panel, control_panel_shown
