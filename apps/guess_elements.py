@@ -268,18 +268,10 @@ def __(colors_map, go):
 
 
 @app.cell
-def __(
-    energy_range,
-    go,
-    int_spec,
-    int_spec_log,
-    make_subplots,
-    mo,
-    peak_ranges,
-):
+def __(go, int_spec, int_spec_log, make_subplots, mo, peak_ranges):
     peak_pos_fig = make_subplots(rows=2, cols=1)
-    peak_pos_fig.add_trace(go.Scatter(y=int_spec[energy_range.value[0]:energy_range.value[1] + 1]), row=1, col=1)
-    peak_pos_fig.add_trace(go.Scatter(y=int_spec_log[energy_range.value[0]:energy_range.value[1] + 1]), row=2, col=1)
+    peak_pos_fig.add_trace(go.Scatter(y=int_spec), row=1, col=1)
+    peak_pos_fig.add_trace(go.Scatter(y=int_spec_log), row=2, col=1)
 
     peak_pos_fig.update_layout(shapes=peak_ranges)
     peak_pos_fig.update_layout(showlegend=False)
@@ -425,7 +417,7 @@ def __(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
         )
         alpha = 0.4
         for p_n, r in peak_rg.items():
-            peak_ranges.append(dict(type="rect", x0=r[0]-energy_range.value[0], x1=r[1]-energy_range.value[0], y0=0, y1=1, xref="x", yref="paper", fillcolor=elem_colors[ii], opacity=alpha, layer="below", line_width=0))
+            peak_ranges.append(dict(type="rect", x0=r[0], x1=r[1], y0=0, y1=1, xref="x", yref="paper", fillcolor=elem_colors[ii], opacity=alpha, layer="below", line_width=0))
             alpha /= 1.1
         colors_map[ee] = elem_colors[ii]
     return (

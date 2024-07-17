@@ -144,7 +144,7 @@ def __(
 def __(configs, elem_selection, mo, param_selection):
     control_panel = mo.accordion({'Elements': elem_selection,
                            'Parameters': param_selection,
-                           'Configs': configs})
+                           'Configs': configs}, multiple=True)
     control_panel_shown = True
     control_panel
     return control_panel, control_panel_shown
@@ -162,6 +162,7 @@ def __(
     device_selection,
     elem_checkboxes,
     energy_range,
+    fit_indices_list,
     init_amp_checkbox,
     int_spec_og,
     iter_slider,
@@ -185,7 +186,7 @@ def __(
             fitting_params=[k for k,v in param_checkboxes.items() if v[0].value],
             init_param_vals={k:float(v[2].value) for k,v in param_checkboxes.items() if v[0].value},
             fixed_param_vals={k:float(v[2].value) for k,v in param_checkboxes.items() if v[0].value and v[1].value},
-            target_ranges=None,
+            indices=fit_indices_list[-1],
             tune_params=True,
             init_amp=init_amp_checkbox.value,
             use_snip=use_snip_checkbox.value,
@@ -252,18 +253,136 @@ def __(elem_checkboxes, fitted_tensors, go, make_subplots, mo):
 
 
 @app.cell
-def __(fitted_tensors, params_record):
-    import pandas as pd
-    for par, l in params_record.items():
-        l.append(fitted_tensors[par].item())
-    pd.DataFrame(params_record)
-    return l, par, pd
+def __(
+    confirm_range_button,
+    energy_level_slider,
+    focus_target_switch,
+    mo,
+    range_fig,
+    results_shown,
+):
+    mo.accordion({'Target ranges': mo.vstack([range_fig, mo.hstack([focus_target_switch, energy_level_slider, confirm_range_button])])}) if results_shown else None
+    return
 
 
 @app.cell
-def __(default_fitting_params):
-    params_record = {p: [] for p in default_fitting_params}
-    return params_record,
+def __(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
+    mo.stop(not confirm_range_button.value)
+
+    fit_indices_list[-1] = elem_peak_indices
+    mo.callout('Target ranges have been updated. Please select parameters to re-run the fitting process.', kind='success')
+    return
+
+
+@app.cell
+def __(fitted_tensors, mo, params_record):
+    import pandas as pd
+    for par, l in params_record.items():
+        l.append(fitted_tensors[par].item())
+    params_table = mo.ui.table(pd.DataFrame(params_record), selection='single')
+    params_table
+    return l, par, params_table, pd
+
+
+@app.cell
+def __(load_params_button, params_table):
+    load_params_button.right() if len(params_table.value)>0 else None
+    return
+
+
+@app.cell
+def __(mo):
+    load_params_button = mo.ui.button(label='Load selected parameters and re-run')
+    return load_params_button,
+
+
+@app.cell
+def __(
+    elem_peak_shapes,
+    fit_labels,
+    fitted_bkg,
+    fitted_spec,
+    focus_target_switch,
+    go,
+    int_spec,
+    make_subplots,
+    np,
+    px,
+    spec_x,
+):
+    range_fig = make_subplots(rows=2, cols=1)
+
+    for iii, specc in enumerate([int_spec, fitted_bkg, fitted_spec+fitted_bkg]):
+        range_fig.add_trace(go.Scatter(x=spec_x, y=specc, mode='lines', name=fit_labels[iii], line=dict(color=px.colors.qualitative.Plotly[iii])), row=1, col=1)
+        specc_log = np.log10(np.clip(specc, 0, None)+1)
+        range_fig.add_trace(go.Scatter(x=spec_x, y=specc_log, mode='lines', showlegend=False, line=dict(color=px.colors.qualitative.Plotly[iii])), row=2, col=1)
+
+    if focus_target_switch.value:
+        range_fig.update_layout(shapes=elem_peak_shapes, overwrite=True)
+    return iii, range_fig, specc, specc_log
+
+
+@app.cell
+def __(mo):
+    focus_target_switch = mo.ui.switch(label='Focus on target elements', value=False)
+    energy_level_slider = mo.ui.slider(start=1, stop=6, step=1, value=1, label='Energy levels')
+    confirm_range_button = mo.ui.run_button(label='Load target ranges')
+    return confirm_range_button, energy_level_slider, focus_target_switch
+
+
+@app.cell
+def __(fit_indices_list, focus_target_switch):
+    if not focus_target_switch.value:
+        fit_indices_list[-1] = None
+    return
+
+
+@app.cell
+def __(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
+    from maps_torch.util import get_peak_ranges
+
+    plot_elems = [k for k, v in elem_checkboxes.items() if v.value]
+    elem_peak_indices = []
+    elem_peak_shapes = []
+    for ii, ee in enumerate(plot_elems):
+        peak_rg = get_peak_ranges(
+            [ee],
+            fitted_tensors["COHERENT_SCT_ENERGY"].item(),
+            fitted_tensors["COMPTON_ANGLE"].item(),
+            fitted_tensors["ENERGY_OFFSET"].item(),
+            fitted_tensors["ENERGY_SLOPE"].item(),
+            fitted_tensors['ENERGY_QUADRATIC'].item(),
+            energy_range.value,
+        )
+        alpha = 0.2
+        for p_n, r in peak_rg.items():
+            if p_n in ['COMPTON_AMPLITUDE', 'COHERENT_SCT_AMPLITUDE'] or int(p_n[-1])<energy_level_slider.value:
+                elem_peak_indices += list(range(*r))
+                elem_peak_shapes.append(dict(type="rect", x0=r[0], x1=r[1], y0=0, y1=1, xref="x", yref="paper", fillcolor='yellow', opacity=alpha, layer="below", line_width=0))
+    return (
+        alpha,
+        ee,
+        elem_peak_indices,
+        elem_peak_shapes,
+        get_peak_ranges,
+        ii,
+        p_n,
+        peak_rg,
+        plot_elems,
+        r,
+    )
+
+
+@app.cell
+def __(param_checkbox_vals, param_default_vals, params_table):
+    if len(params_table.value)>0:
+        for pp in params_table.value:
+            if pp in param_checkbox_vals:
+                param_checkbox_vals[pp] = float(params_table.value[pp].item())
+    else:
+        for pp in param_checkbox_vals:
+            param_checkbox_vals[pp] = float(param_default_vals[pp])
+    return pp,
 
 
 @app.cell
@@ -285,19 +404,24 @@ def __(elems, mo):
 
 
 @app.cell
-def __(mo, param_default_vals):
-    from maps_torch.default import default_fitting_params
+def __(
+    default_fitting_params,
+    load_params_button,
+    mo,
+    param_checkbox_vals,
+):
+    load_params_button
 
     param_checkboxes = {}
     for p in default_fitting_params:
         param_checkboxes[p] = [
             mo.ui.checkbox(label=p, value=True),
             mo.ui.checkbox(label='Fix'),
-            mo.ui.text(value=str(param_default_vals[p]))
+            mo.ui.text(value=str(param_checkbox_vals[p]))
         ]
 
     param_selection = mo.vstack([mo.hstack(param_checkboxes[p], justify='start', gap=0) for p in default_fitting_params])
-    return default_fitting_params, p, param_checkboxes, param_selection
+    return p, param_checkboxes, param_selection
 
 
 @app.cell
@@ -341,6 +465,12 @@ def __():
 
 
 @app.cell
+def __():
+    fit_indices_list = [None]
+    return fit_indices_list,
+
+
+@app.cell
 def __(
     acos,
     compton_peak_slider,
@@ -348,7 +478,8 @@ def __(
     incident_energy_slider,
     pi,
 ):
-    from maps_torch.default import default_param_vals
+    from maps_torch.default import default_param_vals, default_fitting_params
+    from copy import copy
 
     coherent_sct_energy = incident_energy_slider.value
     energy_slope = coherent_sct_energy / elastic_peak_slider.value
@@ -357,17 +488,23 @@ def __(
         compton_angle = acos(1-511*(1/compton_energy - 1/coherent_sct_energy))*180/pi
     except:
         compton_angle = default_param_vals['COMPTON_ANGLE']
-    param_default_vals = default_param_vals
+    param_default_vals = copy(default_param_vals)
     param_default_vals['COHERENT_SCT_ENERGY'] = coherent_sct_energy
     param_default_vals['ENERGY_SLOPE'] = energy_slope
     param_default_vals['COMPTON_ANGLE'] = compton_angle
+    param_checkbox_vals = copy(param_default_vals)
+    params_record = {p: [] for p in default_fitting_params}
     return (
         coherent_sct_energy,
         compton_angle,
         compton_energy,
+        copy,
+        default_fitting_params,
         default_param_vals,
         energy_slope,
+        param_checkbox_vals,
         param_default_vals,
+        params_record,
     )
 
 
