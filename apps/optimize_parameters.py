@@ -252,18 +252,32 @@ def __(elem_checkboxes, fitted_tensors, go, make_subplots, mo):
 
 
 @app.cell
-def __(fitted_tensors, params_record):
+def __(fitted_tensors, mo, params_record):
     import pandas as pd
     for par, l in params_record.items():
         l.append(fitted_tensors[par].item())
-    pd.DataFrame(params_record)
-    return l, par, pd
+    params_table = mo.ui.table(pd.DataFrame(params_record), selection='single')
+    params_table
+    return l, par, params_table, pd
 
 
 @app.cell
-def __(default_fitting_params):
-    params_record = {p: [] for p in default_fitting_params}
-    return params_record,
+def __(mo):
+    load_params_button = mo.ui.button(label='Load selected parameters')
+    load_params_button.right()
+    return load_params_button,
+
+
+@app.cell
+def __(param_checkbox_vals, param_default_vals, params_table):
+    if len(params_table.value)>0:
+        for pp in params_table.value:
+            if pp in param_checkbox_vals:
+                param_checkbox_vals[pp] = float(params_table.value[pp].item())
+    else:
+        for pp in param_checkbox_vals:
+            param_checkbox_vals[pp] = float(param_default_vals[pp])
+    return pp,
 
 
 @app.cell
@@ -285,19 +299,24 @@ def __(elems, mo):
 
 
 @app.cell
-def __(mo, param_default_vals):
-    from maps_torch.default import default_fitting_params
+def __(
+    default_fitting_params,
+    load_params_button,
+    mo,
+    param_checkbox_vals,
+):
+    load_params_button
 
     param_checkboxes = {}
     for p in default_fitting_params:
         param_checkboxes[p] = [
             mo.ui.checkbox(label=p, value=True),
             mo.ui.checkbox(label='Fix'),
-            mo.ui.text(value=str(param_default_vals[p]))
+            mo.ui.text(value=str(param_checkbox_vals[p]))
         ]
 
     param_selection = mo.vstack([mo.hstack(param_checkboxes[p], justify='start', gap=0) for p in default_fitting_params])
-    return default_fitting_params, p, param_checkboxes, param_selection
+    return p, param_checkboxes, param_selection
 
 
 @app.cell
@@ -348,7 +367,8 @@ def __(
     incident_energy_slider,
     pi,
 ):
-    from maps_torch.default import default_param_vals
+    from maps_torch.default import default_param_vals, default_fitting_params
+    from copy import copy
 
     coherent_sct_energy = incident_energy_slider.value
     energy_slope = coherent_sct_energy / elastic_peak_slider.value
@@ -357,17 +377,23 @@ def __(
         compton_angle = acos(1-511*(1/compton_energy - 1/coherent_sct_energy))*180/pi
     except:
         compton_angle = default_param_vals['COMPTON_ANGLE']
-    param_default_vals = default_param_vals
+    param_default_vals = copy(default_param_vals)
     param_default_vals['COHERENT_SCT_ENERGY'] = coherent_sct_energy
     param_default_vals['ENERGY_SLOPE'] = energy_slope
     param_default_vals['COMPTON_ANGLE'] = compton_angle
+    param_checkbox_vals = copy(param_default_vals)
+    params_record = {p: [] for p in default_fitting_params}
     return (
         coherent_sct_energy,
         compton_angle,
         compton_energy,
+        copy,
+        default_fitting_params,
         default_param_vals,
         energy_slope,
+        param_checkbox_vals,
         param_default_vals,
+        params_record,
     )
 
 
