@@ -459,7 +459,7 @@ def __():
     import torch
 
     device_list = ['cpu']
-    if torch.cuda.is_available:
+    if torch.cuda.is_available():
         device_list.append('cuda')
     return device_list, torch
 
