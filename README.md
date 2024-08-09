@@ -27,6 +27,8 @@ conda env create -f env.yml
 conda activate mapstorch
 ```
 
+If GPU is available, please reinstall `torch` following https://pytorch.org/get-started/locally/ to make sure the Nvidia drivers are correctly installed.
+
 ## Prepare data
 The input files are HDF5 files produced by XRFMaps, it should at least contain the spectra volume information.
 
@@ -36,10 +38,8 @@ The input files are HDF5 files produced by XRFMaps, it should at least contain t
 * Optimize parameters: ```marimo run apps/optimize_parameters.py```
 
 ## Roadmap
-- [ ] Advaned optimization example
-- [ ] Creating elemental maps example
-- [ ] Creating parameter maps example
-- [ ] Creating scripting examples
+- [ ] Advaned optimization examples
+- [ ] Scripting examples
 
 ## Contact
 If you want to report bug or suggest features/examples, please open new github Issues. If you want to contribute to the package, please fork the repository, create a new branch and then open a pull request. If you need help using the software or analyzing challenging XRF data, please reach out to xyin@anl.gov or aglowacki@anl.gov
