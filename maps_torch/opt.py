@@ -47,9 +47,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import trange
+from tqdm.contrib.concurrent import thread_map
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from functools import partial
 
+from maps_torch.util import split_into_tiles, optimize_parallelization
 from maps_torch.bkg import snip_bkg
 from maps_torch.map import model_spec, model_spec_vol
 from maps_torch.default import (
@@ -254,11 +257,14 @@ def fit_spec_vol(
     use_step=True,
     use_tail=False,
     loss="mse",
+    return_loss_trace=False,
     optimizer="adam",
     use_scheduler=False,
     n_iter=1000,
     progress_bar=True,
+    progress_bar_kwargs={},
     device="cuda",
+    status_updator=None,
 ):
     assert loss in ["mse", "l1"], "Loss function not supported"
     assert optimizer in ["adam", "sgd"], "Optimizer not supported"
@@ -307,7 +313,7 @@ def fit_spec_vol(
         )
 
     loss_trace = []
-    for _ in trange(n_iter, disable=not progress_bar):
+    for _ in trange(n_iter, disable=not progress_bar, **progress_bar_kwargs):
         optimizer.zero_grad()
         bkg = (
             snip_bkg(
@@ -345,5 +351,120 @@ def fit_spec_vol(
         optimizer.step()
         if use_scheduler:
             scheduler.step(loss_val)
+        if status_updator is not None:
+            status_updator.update()
+        loss_res = loss_trace if return_loss_trace else loss_vol.detach().cpu().numpy()
 
-    return tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_vol
+    return tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_res
+
+
+def process_tile(tile_data, energy_range, elements_to_fit, fitting_params, init_param_vals, 
+                 fixed_param_vals, indices, tune_params, init_amp, use_snip, use_step, 
+                 use_tail, loss, optimizer, use_scheduler, n_iter, device, progress_bar):
+    """Process a single tile."""
+    tile, (i, j) = tile_data
+    tensors, spec_fit, bkg, loss_vol = fit_spec_vol(
+        tile, energy_range, elements_to_fit=elements_to_fit, fitting_params=fitting_params, 
+        init_param_vals=init_param_vals, fixed_param_vals=fixed_param_vals, indices=indices,
+        tune_params=tune_params, init_amp=init_amp, use_snip=use_snip, use_step=use_step,
+        use_tail=use_tail, loss=loss, optimizer=optimizer, use_scheduler=use_scheduler,
+        n_iter=n_iter, progress_bar=progress_bar, device=device,
+        progress_bar_kwargs={'desc': f"Tile ({i}, {j})", 'miniters':20}
+    )
+    return (i, j), tensors, spec_fit, bkg, loss_vol
+
+
+def fit_spec_vol_parallel(
+    spec_vol,
+    energy_range,
+    elements_to_fit=default_fitting_elems,
+    fitting_params=default_fitting_params,
+    init_param_vals=default_param_vals,
+    fixed_param_vals={},
+    indices=None,
+    tune_params=True,
+    init_amp=True,
+    use_snip=True,
+    use_step=True,
+    use_tail=False,
+    loss="mse",
+    optimizer="adam",
+    use_scheduler=False,
+    n_iter=1000,
+    device="cuda",
+    tile_size=None,
+    n_workers=None,
+    return_tiles=False,
+    progress_bar=True,
+    inner_progress_bar=False,
+):
+    if tile_size is None or n_workers is None:
+        tile_size, n_workers = optimize_parallelization(spec_vol.shape, device)
+    
+    # Split the spec_vol into tiles
+    tiles = split_into_tiles(spec_vol, tile_size)
+
+    # Create a partial function with all the fixed arguments
+    process_tile_partial = partial(
+        process_tile, 
+        energy_range=energy_range, 
+        elements_to_fit=elements_to_fit,
+        fitting_params=fitting_params,
+        init_param_vals=init_param_vals,
+        fixed_param_vals=fixed_param_vals,
+        indices=indices,
+        tune_params=tune_params,
+        init_amp=init_amp,
+        use_snip=use_snip,
+        use_step=use_step,
+        use_tail=use_tail,
+        loss=loss,
+        optimizer=optimizer,
+        use_scheduler=use_scheduler,
+        n_iter=n_iter,
+        device=device,
+        progress_bar=inner_progress_bar
+    )
+
+    # Process tiles in parallel
+    total_tiles = len(tiles)
+    if progress_bar:
+        results = thread_map(process_tile_partial, tiles, max_workers=n_workers, 
+                             desc="Processing tiles", total=total_tiles)
+    else:
+        if device == "cuda":
+            # Use ThreadPoolExecutor for GPU to avoid forking issues
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(process_tile_partial, tiles))
+        else:
+            # Use ProcessPoolExecutor for CPU to leverage multiple cores
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(process_tile_partial, tiles))
+    if return_tiles:
+        return results
+    else:
+        # Reconstruct the full output arrays
+        h, w, _ = spec_vol.shape
+        tensor_keys = results[0][1].keys()
+        full_spec_fit = np.zeros((h, w, energy_range[1] - energy_range[0] + 1))
+        full_bkg = np.zeros_like(full_spec_fit)
+        full_loss_vol = np.zeros_like(full_spec_fit)
+        tensor_maps = {}
+        for key in tensor_keys:
+            if key in fitting_params and tune_params and key not in fixed_param_vals:
+                tensor_maps[key] = np.zeros((h, w))
+            if key in elements_to_fit:
+                tensor_maps[key] = np.zeros((h, w))
+
+        for (i, j), tensors, spec_fit, bkg, loss_vol in results:
+            th, tw = spec_fit.shape[:2]
+            full_spec_fit[i:i+th, j:j+tw] = spec_fit
+            full_bkg[i:i+th, j:j+tw] = bkg
+            full_loss_vol[i:i+th, j:j+tw] = loss_vol
+            for key in tensor_keys:
+                if key in fitting_params and tune_params and key not in fixed_param_vals:
+                    tensor_maps[key][i:i+th, j:j+tw] = tensors[key].item()
+                if key in elements_to_fit:
+                    tensor_maps[key][i:i+th, j:j+tw] = tensors[key].detach().cpu().numpy()
+
+        return tensor_maps, full_spec_fit, full_bkg, full_loss_vol

@@ -467,7 +467,7 @@ def model_spec_vol(
     if extra_info:
         agr_specs.append(ev)
     for e in elements_to_fit:
-        if e in default_fitting_elems:
+        if e in default_fitting_elems and not e in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]:
             element_spec = model_elem_spec_vol(
                 params, e, ev, use_step, use_tail, device=device, e_consts=e_consts, elem_info=elem_info
             )
