@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,7 +41,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
@@ -220,7 +220,11 @@ default_auxiliary_comps = [
     "COHERENT_SCT_AMPLITUDE",
 ]
 default_fitting_elems = (
-    default_K_lines + default_pileups + default_auxiliary_comps + default_L_lines + default_M_lines
+    default_K_lines
+    + default_pileups
+    + default_auxiliary_comps
+    + default_L_lines
+    + default_M_lines
 )
 
 # Default element information

@@ -47,7 +47,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import marimo
 
-__generated_with = "0.7.1"
+__generated_with = "0.8.0"
 app = marimo.App(width="medium")
 
 
@@ -78,9 +78,12 @@ def __(mo):
     int_spec_path = mo.ui.dropdown(['MAPS/int_spec', 'MAPS/Spectra/Integrateds_Spectra/Spectra'], 
                                    value='MAPS/int_spec',
                                   label='Integrated spectrum location')
+    elem_path = mo.ui.dropdown(['MAPS/channel_names', 'None'], 
+                                   value='None',
+                                  label='Energy channel names location')
     dataset_button = mo.ui.run_button(label='Load')
-    mo.hstack([int_spec_path, dataset_button], justify='start', gap=1).right()
-    return dataset_button, int_spec_path
+    mo.hstack([int_spec_path, elem_path, dataset_button], justify='start', gap=1).right()
+    return dataset_button, elem_path, int_spec_path
 
 
 @app.cell
@@ -205,11 +208,25 @@ def __(
     amps,
     default_fitting_elems,
     elem_selection_slider,
+    init_elems,
     mo,
     results_shown,
 ):
     elem_checkboxes = {}
-    selected_elem = list(amps.keys())[-elem_selection_slider.value:]
+    if len(init_elems)>0:
+        init_elem_ranked = [e for e in list(amps.keys()) if e in init_elems]
+        non_init_elem_ranked = [e for e in list(amps.keys()) if not e in init_elems]
+        if elem_selection_slider.value == 0:
+            selected_elem = init_elems
+        elif elem_selection_slider.value>0:
+            selected_elem = init_elems + non_init_elem_ranked[-elem_selection_slider.value:]
+        else:
+            selected_elem = init_elem_ranked[-elem_selection_slider.value:]
+    else:
+        if elem_selection_slider.value <= 0:
+            selected_elem = []
+        else:
+            selected_elem = list(amps.keys())[-elem_selection_slider.value:]
     if not 'COHERENT_SCT_AMPLITUDE' in selected_elem:
         selected_elem.append('COHERENT_SCT_AMPLITUDE')
     if not 'COMPTON_AMPLITUDE' in selected_elem:
@@ -227,15 +244,19 @@ def __(
         elem_checkboxes,
         elem_selection,
         elem_selection_shown,
+        init_elem_ranked,
+        non_init_elem_ranked,
         selected_elem,
     )
 
 
 @app.cell
-def __(default_fitting_elems, mo):
-    elem_selection_slider = mo.ui.slider(start=1, stop=len(default_fitting_elems), step=1, value=20, full_width=True)
+def __(init_elems, mo, run_button):
+    mo.stop(not run_button.value)
+    elem_selection_slider_value = 5 if len(init_elems)>0 else 12
+    elem_selection_slider = mo.ui.slider(start=-len(init_elems), stop=min(40, 60-len(init_elems)), step=1, value=elem_selection_slider_value, full_width=True)
     elem_selection_slider
-    return elem_selection_slider,
+    return elem_selection_slider, elem_selection_slider_value
 
 
 @app.cell
@@ -346,11 +367,14 @@ def __(
     energy_range,
     eval_bkg,
     eval_tensors,
+    evaluate_button,
     go,
     int_spec_og,
+    mo,
     plot_elems,
     torch,
 ):
+    mo.stop(not evaluate_button.value)
     from maps_torch.map import model_elem_spec, compton_peak, elastic_peak
 
     with torch.no_grad():
@@ -400,7 +424,7 @@ def __(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
     adjust_button
 
     from maps_torch.util import get_peak_ranges
-    elem_colors = px.colors.qualitative.Alphabet
+    elem_colors = px.colors.qualitative.Light24 + px.colors.qualitative.Dark24
 
     plot_elems = [k for k, v in elem_checkboxes.items() if v.value]
     peak_ranges = []
@@ -482,11 +506,23 @@ def __(energy_range, int_spec_og, np):
 
 
 @app.cell
-def __(dataset, dataset_button, int_spec_path, mo, read_dataset):
+def __(
+    dataset,
+    dataset_button,
+    elem_path,
+    int_spec_path,
+    mo,
+    read_dataset,
+):
     mo.stop(not dataset_button.value)
-    dataset_dict = read_dataset(dataset.value[0].path, int_spec_key=int_spec_path.value)
+    if elem_path.value == 'None':
+        dataset_dict = read_dataset(dataset.value[0].path, int_spec_key=int_spec_path.value)
+        init_elems = []
+    else:
+        dataset_dict = read_dataset(dataset.value[0].path, fit_elem_key=elem_path.value, int_spec_key=int_spec_path.value)
+        init_elems = dataset_dict['elems']
     int_spec_og = dataset_dict['int_spec']
-    return dataset_dict, int_spec_og
+    return dataset_dict, init_elems, int_spec_og
 
 
 if __name__ == "__main__":

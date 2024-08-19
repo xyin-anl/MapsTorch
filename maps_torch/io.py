@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,21 +41,26 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
 import h5py
 import numpy as np
 
+
 def read_dataset(file_path, spec_vol_key=None, fit_elem_key=None, int_spec_key=None):
     spec_vol, fit_elems, int_spec = None, None, None
-    with h5py.File(file_path, 'r') as f:
+    with h5py.File(file_path, "r") as f:
         if spec_vol_key is not None:
             try:
                 spec_vol = f[spec_vol_key][:].astype(np.float32)
             except:
-                raise KeyError("Could not find spectra volume in the dataset with the given key {}".format(spec_vol_key))
+                raise KeyError(
+                    "Could not find spectra volume in the dataset with the given key {}".format(
+                        spec_vol_key
+                    )
+                )
         else:
             try:
                 spec_vol = f["MAPS/Spectra/mca_arr"][:].astype(np.float32)
@@ -68,7 +73,11 @@ def read_dataset(file_path, spec_vol_key=None, fit_elem_key=None, int_spec_key=N
             try:
                 fit_elems = f[fit_elem_key][:]
             except:
-                raise KeyError("Could not find fitting elements in the dataset with the given key {}".format(fit_elem_key))
+                raise KeyError(
+                    "Could not find fitting elements in the dataset with the given key {}".format(
+                        fit_elem_key
+                    )
+                )
         else:
             try:
                 fit_elems = f["MAPS/channel_names"][:]
@@ -81,14 +90,18 @@ def read_dataset(file_path, spec_vol_key=None, fit_elem_key=None, int_spec_key=N
             try:
                 int_spec = f[int_spec_key][:].astype(np.float32)
             except:
-                raise KeyError("Could not find integrated spectra in the dataset with the given key {}".format(int_spec_key))
+                raise KeyError(
+                    "Could not find integrated spectra in the dataset with the given key {}".format(
+                        int_spec_key
+                    )
+                )
         else:
             try:
                 int_spec = f["MAPS/int_spec"][:].astype(np.float32)
             except:
                 raise KeyError("Could not find integrated spectra in the dataset")
     if fit_elems is not None:
-        fit_elems = [elem.decode('utf-8') for elem in fit_elems]
+        fit_elems = [elem.decode("utf-8") for elem in fit_elems]
         if "COHERENT_SCT_AMPLITUDE" not in fit_elems:
             fit_elems.append("COHERENT_SCT_AMPLITUDE")
         if "COMPTON_AMPLITUDE" not in fit_elems:

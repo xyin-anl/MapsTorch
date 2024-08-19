@@ -47,13 +47,13 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import marimo
 
-__generated_with = "0.7.9"
+__generated_with = "0.8.0"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def __(__file__):
-    import sys
+    import sys, pickle
     from pathlib import Path; sys.path.append(str(Path(__file__).parent.parent.absolute()))
 
     from math import floor, ceil, acos, pi
@@ -80,6 +80,7 @@ def __(__file__):
         np,
         pd,
         pi,
+        pickle,
         plt,
         px,
         read_dataset,
@@ -89,8 +90,8 @@ def __(__file__):
 
 
 @app.cell
-def __(mo):
-    mo.callout('To process spectra volume and generate element/parameter maps, GPU acceleration is needed.', kind='warn')
+def __(mo, torch):
+    mo.callout('To process spectra volume and generate element/parameter maps, GPU acceleration is needed.', kind='danger') if not torch.cuda.is_available() else None
     return
 
 
@@ -109,69 +110,24 @@ def __(mo):
                                       label='Spectra volume location')
     energy_dimension = mo.ui.dropdown(['first', 'middle', 'last', 'guess'], value='guess',
                                          label='Energy dimension')
-    elem_path = mo.ui.dropdown(['MAPS/channel_names'], 
-                                   value='MAPS/channel_names',
-                                  label='Energy channel names location')
     dataset_button = mo.ui.run_button(label='Load')
-    mo.hstack([spec_vol_path, energy_dimension, elem_path, dataset_button], justify='start', gap=1).right()
-    return dataset_button, elem_path, energy_dimension, spec_vol_path
+    mo.hstack([spec_vol_path, energy_dimension, dataset_button], justify='start', gap=1).right()
+    return dataset_button, energy_dimension, spec_vol_path
 
 
 @app.cell
 def __(dataset_button, e_dim_guess, energy_dimension, mo):
     mo.stop(not dataset_button.value)
+    energy_dimension_guessed = True
     mo.callout(f'Assume the {e_dim_guess} dimension is the energy', kind='info') if energy_dimension.value == 'guess' else None
-    return
+    return energy_dimension_guessed,
 
 
 @app.cell
-def __(dataset_button, int_spec_og, mo):
-    mo.stop(not dataset_button.value)
-    energy_range = mo.ui.range_slider(start=0, stop=int_spec_og.shape[-1], step=1, label='Energy range', value=[50, 1450], full_width=True)
-    energy_range
-    return energy_range,
-
-
-@app.cell
-def __(go, int_spec, int_spec_log, make_subplots, mo, np):
-    int_spec_fig = make_subplots(rows=2, cols=1)
-
-    # Add trace for the 1D data
-    int_spec_fig.append_trace(go.Scatter(x=np.arange(len(int_spec)), y=int_spec, mode='lines', name='Photon counts'), row=1, col=1)
-    int_spec_fig.append_trace(go.Scatter(x=np.arange(len(int_spec)), y=int_spec_log, mode='lines', name='Log scale'), row=2, col=1)
-
-    int_spec_fig.update_layout(showlegend=False)
-
-    mo.ui.plotly(int_spec_fig)
-    return int_spec_fig,
-
-
-@app.cell
-def __(elems, mo):
-    from maps_torch.default import default_fitting_elems
-
-    elem_checkboxes = {}
-    for e in default_fitting_elems:
-        elem_toggle = True if e in elems else False
-        elem_checkboxes[e] = mo.ui.checkbox(label=e, value=elem_toggle) 
-    elem_selection = mo.hstack([elem_checkboxes[e] for e in default_fitting_elems], wrap=True)
-    elem_selection_shown = True
-    elem_selection
-    return (
-        default_fitting_elems,
-        e,
-        elem_checkboxes,
-        elem_selection,
-        elem_selection_shown,
-        elem_toggle,
-    )
-
-
-@app.cell
-def __(dataset_button, elem_selection_shown, mo):
+def __(dataset_button, energy_dimension_guessed, mo):
     mo.stop(not dataset_button.value)
     param_csv = mo.ui.file(filetypes=['.csv'], multiple=False, kind='area')
-    mo.md(f"Please select the saved parameter file (csv file) \n{param_csv}") if elem_selection_shown else None
+    mo.md(f"Please upload the saved parameter file (csv file) \n{param_csv}") if energy_dimension_guessed else None
     return param_csv,
 
 
@@ -180,16 +136,18 @@ def __(mo, param_csv, pd):
     from io import StringIO
     if len(param_csv.value)>0:
         param_df = pd.read_csv(StringIO(param_csv.value[0].contents.decode()))
-        params_table = mo.ui.table(param_df, selection='single')
+        params_table = mo.ui.table(param_df, selection='single', label='Please select the row of parameters and elements')
     params_table if len(param_csv.value)>0 else None
     return StringIO, param_df, params_table
 
 
 @app.cell
-def __(mo, param_csv, params_table):
-    load_params_button = mo.ui.run_button(label='Load selected parameters to see fitting result')
-    load_params_button.right() if len(param_csv.value)>0 and len(params_table.value)>0 else None
-    return load_params_button,
+def __(int_spec_og, mo, params_table):
+    energy_range = mo.ui.range_slider(start=0, stop=int_spec_og.shape[-1], step=1, label='Energy range', value=[50, 1450])
+    n_iterations = mo.ui.slider(start=100, stop=500, value=200, label='Number of iterations')
+    load_params_button = mo.ui.run_button(label='Load selected settings and fit integrated spectrum')
+    mo.hstack([energy_range, n_iterations, load_params_button], justify='start', gap=3).right() if len(params_table.value)>0 else None
+    return energy_range, load_params_button, n_iterations
 
 
 @app.cell
@@ -210,224 +168,213 @@ def __(fitted_bkg, fitted_spec, go, int_spec, make_subplots, mo, np, px):
 
 
 @app.cell
-def __(init_fit_shown, mo):
-    init_amp_checkbox = mo.ui.checkbox(label='Initialize amplitudes', value=True)
-    use_snip_checkbox = mo.ui.checkbox(label='Use SNIP background', value=True)
-    use_step_checkbox = mo.ui.checkbox(label='Modify pearks with step', value=True)
-    loss_selection = mo.ui.dropdown(['mse', 'l1'], value='mse', label='loss')
-    optimizer_selection = mo.ui.dropdown(['adam', 'sgd'], value='adam', label='optimizer')
-    mo.hstack([init_amp_checkbox, use_snip_checkbox, use_step_checkbox, loss_selection, optimizer_selection], justify='start', gap=0.5) if init_fit_shown else None
-    return (
-        init_amp_checkbox,
-        loss_selection,
-        optimizer_selection,
-        use_snip_checkbox,
-        use_step_checkbox,
-    )
-
-
-@app.cell
-def __(init_fit_shown, mo, spec_vol_t):
-    from maps_torch.util import optimize_parallelization
-
-    tile_size_guess, n_workers_guess = optimize_parallelization(spec_vol_t.shape, device='cuda')
-    mo.md(f"Estimated maximum tile size: {tile_size_guess}, number of available GPU workers: {n_workers_guess}") if init_fit_shown else None
-    return n_workers_guess, optimize_parallelization, tile_size_guess
-
-
-@app.cell
-def __(mo, n_workers_guess, tile_size_guess):
-    tune_params_checkbox = mo.ui.checkbox(label='Tune each tile\'s parameters', value=True)
-    tile_size_slider = mo.ui.slider(start=32, stop=tile_size_guess, step=32, value=tile_size_guess, label='Tile size')
-    n_workers_slider = mo.ui.slider(start=1, stop=n_workers_guess, step=1, value=n_workers_guess, label='Parallel workers')
-    return n_workers_slider, tile_size_slider, tune_params_checkbox
-
-
-@app.cell
 def __(
-    init_fit_shown,
-    mo,
-    n_workers_slider,
-    tile_size_slider,
-    tune_params_checkbox,
-):
-    iter_slider = mo.ui.slider(value=tile_size_slider.value//32*100, start=100, stop=500, step=50, label='Iterations each tile')
-    mo.hstack([tune_params_checkbox, tile_size_slider, n_workers_slider, iter_slider], justify='start', gap=0.5) if init_fit_shown else None
-    return iter_slider,
-
-
-@app.cell
-def __(np, spec_vol_t, tile_size_slider):
-    n_tiles_x = np.ceil(spec_vol_t.shape[1] / tile_size_slider.value).astype(int)
-    n_tiles_y = np.ceil(spec_vol_t.shape[0] / tile_size_slider.value).astype(int)
-    n_tiles = n_tiles_x * n_tiles_y
-    return n_tiles, n_tiles_x, n_tiles_y
-
-
-@app.cell
-def __(iter_slider, mo, n_tiles, n_tiles_x, n_tiles_y):
-    mo.md(f"Current selection results in {n_tiles_x} * {n_tiles_y} = {n_tiles} tiles, {iter_slider.value} * {n_tiles} = {iter_slider.value*n_tiles} iterations.")
-    return
-
-
-@app.cell
-def __(init_fit_shown, mo, torch):
-    run_button = mo.ui.run_button()
-    run_button.right() if init_fit_shown and torch.cuda.is_available() else None
-    return run_button,
-
-
-@app.cell
-def __(mo, torch):
-    mo.callout('Torch reports GPU is not available.', kind='danger') if not torch.cuda.is_available() else None
-    return
-
-
-@app.cell
-def __(mo, run_button):
-    mo.stop(not run_button.value)
-    mo.callout('This may take a while depending on the computing resource available...', kind='warn')
-    return
-
-
-@app.cell
-def __(
-    elem_checkboxes,
-    energy_range,
-    init_amp_checkbox,
-    iter_slider,
-    loss_selection,
-    mo,
-    n_workers_slider,
-    optimizer_selection,
-    params_table,
-    run_button,
-    spec_vol_t,
-    tile_size_slider,
-    tune_params_checkbox,
-    use_snip_checkbox,
-    use_step_checkbox,
-):
-    mo.stop(not run_button.value)
-    from maps_torch.opt import fit_spec_vol_parallel
-
-    with mo.redirect_stderr():
-        tensor_maps, full_spec_fit, full_bkg, full_loss_vol = fit_spec_vol_parallel(
-            spec_vol_t,
-            energy_range.value,
-            elements_to_fit=[k for k,v in elem_checkboxes.items() if v.value],
-            fitting_params=[p for p in params_table.value],
-            init_param_vals={k:p.item() for k,p in params_table.value.items()},
-            tune_params=tune_params_checkbox.value,
-            init_amp=init_amp_checkbox.value,
-            use_snip=use_snip_checkbox.value,
-            use_step=use_step_checkbox.value,
-            loss=loss_selection.value,
-            optimizer=optimizer_selection.value,
-            n_iter=iter_slider.value,
-            device='cuda',
-            tile_size=tile_size_slider.value,
-            n_workers=n_workers_slider.value
-        )
-    return (
-        fit_spec_vol_parallel,
-        full_bkg,
-        full_loss_vol,
-        full_spec_fit,
-        tensor_maps,
-    )
-
-
-@app.cell
-def __(full_bkg, full_loss_vol, full_spec_fit, mo, tensor_maps):
-    save_files_button = mo.ui.run_button(label='Save files')
-    save_files_button.right() if ((tensor_maps is not None) and (full_spec_fit is not None) and (full_bkg is not None) and (full_loss_vol is not None)) else None
-    return save_files_button,
-
-
-@app.cell
-def __(
-    energy_range,
-    full_bkg,
-    full_loss_vol,
-    full_spec_fit,
-    mo,
-    save_files_button,
-    tensor_maps,
-):
-    mo.stop(not save_files_button.value)
-    import os, pickle
-
-    if not os.path.exists('output'):
-        os.makedirs('output')
-
-    final_message = ''
-    try:
-        with open('output/energy_range.txt', 'w') as handle:
-            for value in energy_range.value:
-                handle.write(f"{value}\n")
-        final_message += '* Energy range successfully saved in output folder\n'
-    except Exception as e:
-        final_message += f'* Failed to save energy_range: {e}\n'
-        
-    try:
-        with open('output/tensor_maps.pkl', 'wb') as handle:
-            pickle.dump(tensor_maps, handle)
-        final_message += '* Maps successfully saved in output folder\n'
-    except Exception as e:
-        final_message += f'* Failed to save maps: {e}\n'
-
-    try:
-        with open('output/full_spec_fit.pkl', 'wb') as handle:
-            pickle.dump(full_spec_fit, handle)
-        final_message += '* Fitted spectra volume successfully saved in output folder\n'
-    except Exception as e:
-        final_message += f'* Failed to save fitted spectra volume: {e}\n'
-
-    try:
-        with open('output/full_bkg.pkl', 'wb') as handle:
-            pickle.dump(full_bkg, handle)
-        final_message += '* Fitted background successfully saved in output folder\n'
-    except Exception as e:
-        final_message += f'* Failed to save fitted background: {e}\n'
-
-    try:
-        with open('output/full_loss_vol.pkl', 'wb') as handle:
-            pickle.dump(full_loss_vol, handle)
-        final_message += '* Training loss trace successfully successfully saved in output folder\n'
-    except Exception as e:
-        final_message += f'* Failed to save training loss trace: {e}\n'
-    return final_message, handle, os, pickle, value
-
-
-@app.cell
-def __(final_message, mo):
-    final_callout_type = 'danger' if 'Failed' in final_message else 'success'
-    mo.callout(mo.md(final_message), kind=final_callout_type)
-    return final_callout_type,
-
-
-@app.cell
-def __(
-    elem_checkboxes,
     energy_range,
     fit_spec,
     int_spec_og,
     load_params_button,
     mo,
+    n_iterations,
     params_table,
 ):
     mo.stop(not load_params_button.value)
-    fitted_tensors, fitted_spec, fitted_bkg, loss_trace = fit_spec(
-        int_spec_og,
-        energy_range.value,
-        elements_to_fit=[k for k,v in elem_checkboxes.items() if v.value],
-        fitting_params=[p for p in params_table.value],
-        init_param_vals={k:p.item() for k,p in params_table.value.items()},
-        fixed_param_vals={k:p.item() for k,p in params_table.value.items()},
-        tune_params=False,
+    elements_to_fit = params_table.value['elements'].item().split(',')
+    fitting_params = [p for p in params_table.value if p != 'elements']
+    param_vals = {k:p.item() for k,p in params_table.value.items() if k != 'elements'}
+    n_iter=n_iterations.value
+    with mo.status.progress_bar(total=n_iter) as bar:
+        fitted_tensors, fitted_spec, fitted_bkg, loss_trace = fit_spec(
+            int_spec_og,
+            energy_range.value,
+            elements_to_fit=elements_to_fit,
+            fitting_params=fitting_params,
+            init_param_vals=param_vals,
+            fixed_param_vals=param_vals,
+            tune_params=False,
+            n_iter=n_iter,
+            status_updator=bar
+        )
+    bar
+    return (
+        bar,
+        elements_to_fit,
+        fitted_bkg,
+        fitted_spec,
+        fitted_tensors,
+        fitting_params,
+        loss_trace,
+        n_iter,
+        param_vals,
     )
-    return fitted_bkg, fitted_spec, fitted_tensors, loss_trace
+
+
+@app.cell
+def __(init_fit_shown, mo):
+    param_maps_button = mo.ui.run_button(label='Something is off, produce parameter maps')
+    elem_maps_button = mo.ui.run_button(label='Looks good, fit the whole spectra volume')
+    mo.hstack([param_maps_button, elem_maps_button], justify='start', gap=2).right() if init_fit_shown else None
+    return elem_maps_button, param_maps_button
+
+
+@app.cell
+def __(dataset, mo, param_maps_button):
+    mo.stop(not param_maps_button.value)
+    param_result_file_name = '{}_fit_spec_vol_params_results.pickle'.format(dataset.value[0].name)
+    mo.callout('Parameter maps will be saved in {}'.format(param_result_file_name), kind='info') if True else None
+    return param_result_file_name,
+
+
+@app.cell
+def __(
+    ceil,
+    elements_to_fit,
+    energy_range,
+    fitting_params,
+    mo,
+    param_maps_button,
+    param_result_file_name,
+    param_vals,
+    pickle,
+    spec_vol_t,
+):
+    mo.stop(not param_maps_button.value)
+    from maps_torch.opt import fit_spec_vol_params
+
+    param_n_tile_side = 5
+    param_tile_size = max(spec_vol_t.shape[0] // param_n_tile_side, spec_vol_t.shape[1] // param_n_tile_side)
+    param_x_tiles = ceil(spec_vol_t.shape[0] / param_tile_size)
+    param_y_tiles = ceil(spec_vol_t.shape[1] / param_tile_size)
+    param_total_tiles = param_x_tiles * param_y_tiles
+    with mo.status.progress_bar(total=400*param_total_tiles) as bar_params:
+        param_dict, param_tile_info, fitted_spec_params, bkg_vol_params, loss_vol_params = fit_spec_vol_params(
+            spec_vol_t,
+            energy_range.value,
+            elements_to_fit=elements_to_fit,
+            fitting_params=fitting_params,
+            init_param_vals=param_vals,
+            fixed_param_vals={},
+            init_amp=True,
+            use_snip=True,
+            use_step=True,
+            use_tail=False,
+            tile_size=param_tile_size,
+            max_n_tile_side=param_n_tile_side,
+            n_iter=400,
+            save_fitted_spec=True,
+            save_loss=True,
+            save_bkg=True,
+            status_updator=bar_params
+        )
+        # Save results for fit_spec_vol_params
+        with open(param_result_file_name, 'wb') as f_params:
+            pickle.dump({
+                'param_dict': param_dict,
+                'tile_info': param_tile_info,
+                'fitted_spec': fitted_spec_params,
+                'bkg': bkg_vol_params,
+                'loss': loss_vol_params,
+                'energy_range': energy_range.value,
+                'elements_to_fit': elements_to_fit,
+            }, f_params)
+    bar_params
+    return (
+        bar_params,
+        bkg_vol_params,
+        f_params,
+        fit_spec_vol_params,
+        fitted_spec_params,
+        loss_vol_params,
+        param_dict,
+        param_n_tile_side,
+        param_tile_info,
+        param_tile_size,
+        param_total_tiles,
+        param_x_tiles,
+        param_y_tiles,
+    )
+
+
+@app.cell
+def __(elem_maps_button, mo, torch):
+    mo.stop(not elem_maps_button.value)
+    mo.callout('To process spectra volume and generate element/parameter maps, GPU acceleration is needed.', kind='danger') if not torch.cuda.is_available() else None
+    return
+
+
+@app.cell
+def __(dataset, elem_maps_button, mo, torch):
+    mo.stop(not elem_maps_button.value or (not torch.cuda.is_available()))
+    elem_result_file_name = '{}_fit_spec_vol_amps_results.pickle'.format(dataset.value[0].name)
+    mo.callout('Elemental maps will be saved in {}'.format(elem_result_file_name), kind='info')
+    return elem_result_file_name,
+
+
+@app.cell
+def __(
+    ceil,
+    elem_maps_button,
+    elem_result_file_name,
+    elements_to_fit,
+    energy_range,
+    mo,
+    param_vals,
+    pickle,
+    spec_vol,
+    spec_vol_t,
+    torch,
+):
+    mo.stop(not elem_maps_button.value or (not torch.cuda.is_available()))
+    from maps_torch.opt import fit_spec_vol_amps
+    from maps_torch.util import estimate_gpu_tile_size
+
+    elem_tile_size = estimate_gpu_tile_size(spec_vol.shape)
+    elem_x_tiles = ceil(spec_vol_t.shape[0] / elem_tile_size)
+    elem_y_tiles = ceil(spec_vol_t.shape[1] / elem_tile_size)
+    elem_total_tiles = elem_x_tiles * elem_y_tiles
+    with mo.status.progress_bar(total=200*elem_total_tiles) as bar_elems:
+        elem_dict, elem_tile_info, fitted_spec_elems, bkg_vol_elems, loss_vol_elems = fit_spec_vol_amps(
+            spec_vol_t,
+            energy_range.value,
+            elements_to_fit=elements_to_fit,
+            param_vals=param_vals,
+            init_amp=True,
+            use_snip=True,
+            use_step=True,
+            use_tail=False,
+            tile_size=elem_tile_size,
+            n_iter=200,
+            save_fitted_spec=True,
+            save_loss=True,
+            save_bkg=True,
+            status_updator=bar_elems
+        )
+        # Save results for fit_spec_vol_params
+        with open(elem_result_file_name, 'wb') as f_elems:
+            pickle.dump({
+                'elem_dict': elem_dict,
+                'tile_info': elem_tile_info,
+                'fitted_spec': fitted_spec_elems,
+                'bkg': bkg_vol_elems,
+                'loss': loss_vol_elems,
+                'energy_range': energy_range.value,
+                'param_vals': param_vals,
+            }, f_elems)
+    bar_elems
+    return (
+        bar_elems,
+        bkg_vol_elems,
+        elem_dict,
+        elem_tile_info,
+        elem_tile_size,
+        elem_total_tiles,
+        elem_x_tiles,
+        elem_y_tiles,
+        estimate_gpu_tile_size,
+        f_elems,
+        fit_spec_vol_amps,
+        fitted_spec_elems,
+        loss_vol_elems,
+    )
 
 
 @app.cell
@@ -461,19 +408,11 @@ def __(energy_dimension, np, spec_vol):
 
 
 @app.cell
-def __(
-    dataset,
-    dataset_button,
-    elem_path,
-    mo,
-    read_dataset,
-    spec_vol_path,
-):
+def __(dataset, dataset_button, mo, read_dataset, spec_vol_path):
     mo.stop(not dataset_button.value)
-    dataset_dict = read_dataset(dataset.value[0].path, fit_elem_key=elem_path.value, spec_vol_key=spec_vol_path.value)
+    dataset_dict = read_dataset(dataset.value[0].path, spec_vol_key=spec_vol_path.value)
     spec_vol = dataset_dict['spec_vol']
-    elems = dataset_dict['elems']
-    return dataset_dict, elems, spec_vol
+    return dataset_dict, spec_vol
 
 
 if __name__ == "__main__":

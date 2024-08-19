@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,7 +41,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
@@ -55,14 +55,15 @@ from maps_torch.map import model_elem_spec, compton_peak, elastic_peak
 from maps_torch.util import get_peak_ranges
 from maps_torch.default import default_fitting_elems
 
-def plot_spec_peaks(spec, 
-                    peak_half_width=5, 
-                    prominence=100, 
-                    generate_plot=False,
-                    save=False, 
-                    show=True):
+
+def plot_spec_peaks(
+    spec, peak_half_width=5, prominence=100, generate_plot=False, save=False, show=True
+):
     peaks, _ = find_peaks(spec, prominence=prominence)
-    peak_ranges = [(max(p - peak_half_width, 0), min(p + peak_half_width, spec.shape[-1])) for p in peaks]
+    peak_ranges = [
+        (max(p - peak_half_width, 0), min(p + peak_half_width, spec.shape[-1]))
+        for p in peaks
+    ]
     if not generate_plot:
         return peak_ranges
     fig, axs = plt.subplots(2, figsize=(12, 6))
@@ -78,6 +79,7 @@ def plot_spec_peaks(spec,
         plt.show()
     plt.close()
     return fig, peak_ranges
+
 
 def plot_specs(spectra, labels=None, dataset="fitting_res.png", save=False, show=False):
     labels = labels if labels is not None else list(range(len(spectra)))
@@ -164,7 +166,7 @@ def plot_elem_peak_ranges(
                 tensors["COMPTON_ANGLE"].item(),
                 tensors["ENERGY_OFFSET"].item(),
                 tensors["ENERGY_SLOPE"].item(),
-                tensors['ENERGY_QUADRATIC'].item(),
+                tensors["ENERGY_QUADRATIC"].item(),
                 energy_range,
             )
             res[e] = rg

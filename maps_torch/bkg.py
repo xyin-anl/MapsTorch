@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,41 +41,29 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
 import torch
-import numpy as np
-from torchaudio.functional import convolve
-
+import torch.nn.functional as F
 from maps_torch.constant import M_SQRT2
 
+
 def snip_op(background, current_width, max_of_xmin, min_of_xmax, device):
-    lo_index = torch.minimum(
-        torch.maximum(
-            torch.arange(background.shape[-1], device=device).expand(background.shape)
-            - current_width,
-            torch.tensor(max_of_xmin, device=device),
-        ),
-        torch.tensor(min_of_xmax, device=device),
-    ).to(torch.int64)
-    hi_index = torch.maximum(
-        torch.minimum(
-            torch.arange(background.shape[-1], device=device).expand(background.shape)
-            + current_width,
-            torch.tensor(min_of_xmax, device=device),
-        ),
-        torch.tensor(max_of_xmin, device=device),
-    ).to(torch.int64)
-    return torch.minimum(
-        (
-            torch.gather(background, -1, lo_index)
-            + torch.gather(background, -1, hi_index)
-        )
-        / 2,
-        background,
+    range_tensor = torch.arange(background.shape[-1], device=device).expand(
+        background.shape
     )
+    lo_index = torch.clamp(range_tensor - current_width, max_of_xmin, min_of_xmax).to(
+        torch.int64
+    )
+    hi_index = torch.clamp(range_tensor + current_width, max_of_xmin, min_of_xmax).to(
+        torch.int64
+    )
+    avg_values = (
+        torch.gather(background, -1, lo_index) + torch.gather(background, -1, hi_index)
+    ) / 2
+    return torch.minimum(avg_values, background)
 
 
 def snip_bkg(
@@ -86,7 +74,6 @@ def snip_bkg(
     e_quad,
     snip_width,
     boxcar_size=5,
-    extra_info=False,
     device="cpu",
 ):
     xmin, xmax = er[0], er[1]
@@ -94,43 +81,35 @@ def snip_bkg(
     energy = e_offset + (energy * e_slope) + (energy**2 * e_quad)
     tmp = (e_offset / 2.3548) ** 2 + energy * 2.96 * e_slope
     tmp = torch.maximum(tmp, torch.zeros_like(tmp, device=device))
-    background = convolve(
-        spec,
-        torch.tensor(
-            np.expand_dims(
-                np.array([1 / boxcar_size] * boxcar_size),
-                axis=list(range(spec.ndim))[:-1],
-            ),
-            dtype=torch.float,
-            device=device,
-        ),
-        mode="same",
+
+    # Ensure spec is on the correct device
+    spec = spec.to(device)
+
+    # Prepare input for conv1d
+    conv_input = spec.reshape(-1, 1, spec.shape[-1])
+
+    # Conv1d operation
+    background = F.conv1d(
+        conv_input,
+        torch.ones(1, 1, boxcar_size, device=device) / boxcar_size,
+        padding="same",
     )
-    if extra_info:
-        bkgs = [background]
+
+    # Reshape conv1d result to match original signal shape
+    background = background.view(spec.shape)
+
     current_width = snip_width * 2.35 * torch.sqrt(tmp) / e_slope
     background = torch.log(torch.log(background + 1) + 1)
-    if extra_info:
-        bkgs.append(background)
     max_of_xmin = max(xmin, 0)
     min_of_xmax = min(xmax, spec.shape[-1] - 1)
     for _ in range(2):
         background = snip_op(
             background, current_width, max_of_xmin, min_of_xmax, device=device
         )
-        if extra_info:
-            bkgs.append(background)
     while torch.max(current_width).item() >= 0.5:
         background = snip_op(
             background, current_width, max_of_xmin, min_of_xmax, device=device
         )
-        if extra_info:
-            bkgs.append(background)
         current_width = current_width / M_SQRT2
     background = torch.exp(torch.exp(background) - 1) - 1
-    background = torch.nan_to_num(background)
-    if extra_info:
-        bkgs.append(background)
-        return bkgs
-    else:
-        return background
+    return torch.nan_to_num(background)

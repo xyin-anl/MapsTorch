@@ -47,7 +47,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import marimo
 
-__generated_with = "0.7.1"
+__generated_with = "0.8.0"
 app = marimo.App(width="medium")
 
 
@@ -275,13 +275,29 @@ def __(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
 
 
 @app.cell
-def __(fitted_tensors, mo, params_record):
+def __(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
     import pandas as pd
+    import datetime
     for par, l in params_record.items():
-        l.append(fitted_tensors[par].item())
-    params_table = mo.ui.table(pd.DataFrame(params_record), selection='single')
+        if par == 'elements':
+            l.append(','.join([k for k,v in elem_checkboxes.items() if v.value]))
+        else:
+            l.append(fitted_tensors[par].item())
+    today = datetime.date.today()
+    today_string = today.strftime("%Y-%m-%d")
+    table_label = dataset.value[0].name + ' parameter tuning record '+ today_string
+    params_table = mo.ui.table(pd.DataFrame(params_record), selection='single', label=table_label)
     params_table
-    return l, par, params_table, pd
+    return (
+        datetime,
+        l,
+        par,
+        params_table,
+        pd,
+        table_label,
+        today,
+        today_string,
+    )
 
 
 @app.cell
@@ -493,7 +509,7 @@ def __(
     param_default_vals['ENERGY_SLOPE'] = energy_slope
     param_default_vals['COMPTON_ANGLE'] = compton_angle
     param_checkbox_vals = copy(param_default_vals)
-    params_record = {p: [] for p in default_fitting_params}
+    params_record = {p: [] for p in default_fitting_params+['elements']}
     return (
         coherent_sct_energy,
         compton_angle,

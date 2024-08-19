@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,7 +41,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
@@ -1177,9 +1177,7 @@ class Henke:
 
             ln_f2_lower = np.log(np.abs(f2_all[lo_e_ind]))
             ln_f2_higher = np.log(np.abs(f2_all[hi_e_ind]))
-            f2_array[i] = np.exp(
-                ln_f2_lower + fraction * (ln_f2_higher - ln_f2_lower)
-            )
+            f2_array[i] = np.exp(ln_f2_lower + fraction * (ln_f2_higher - ln_f2_lower))
 
             delta_array[i] = constant * f1_array[i]
             beta_array[i] = constant * f2_array[i]
@@ -1463,7 +1461,7 @@ class EnergyStruct:
         self.mu_fraction = 0.0
         self.width_multi = 1.0
         self.type = 0
-        self.ptype = ''
+        self.ptype = ""
         self.is_pileup = False
 
     def check_binding_energy(self, info_elements, coherent_sct_energy):
@@ -1473,34 +1471,25 @@ class EnergyStruct:
             return True
         else:
             elname = self.name.split("_")[0]
-            e_info = None
-            for i in range(len(info_elements)):
-                if info_elements[i].name == elname:
-                    e_info = info_elements[i]
+            e_info = next((e for e in info_elements if e.name == elname), None)
             if e_info is None:
                 print(f"Error: Could not find element {elname}")
                 return False
             else:
-                if self.ptype.startswith('K'):
-                    if e_info.bindingE["K"] < coherent_sct_energy:
-                        return True
-                elif self.ptype.startswith('L'):
-                    if self.ptype in ['Lb3', 'Lb4', 'Lg2', 'Lg3', 'Lg4']:
-                        if e_info.bindingE["L1"] < coherent_sct_energy:
-                            return True
-                    elif self.ptype in ['Lb1', 'Lg1', 'Ln']:
-                        if e_info.bindingE["L2"] < coherent_sct_energy:
-                            return True
-                    elif self.ptype in ['La1', 'La2', 'Lb2', 'Ll']:
-                        if e_info.bindingE["L3"] < coherent_sct_energy:
-                            return True
+                if self.ptype.startswith("K"):
+                    return e_info.bindingE["K"] < coherent_sct_energy
+                elif self.ptype.startswith("L"):
+                    if self.ptype in ["Lb3", "Lb4", "Lg2", "Lg3", "Lg4"]:
+                        return e_info.bindingE["L1"] < coherent_sct_energy
+                    elif self.ptype in ["Lb1", "Lg1", "Ln"]:
+                        return e_info.bindingE["L2"] < coherent_sct_energy
+                    elif self.ptype in ["La1", "La2", "Lb2", "Ll"]:
+                        return e_info.bindingE["L3"] < coherent_sct_energy
                     else:
                         print(f"Error: Unknown L shell type {self.ptype}")
-                elif self.ptype.startswith('M'):
-                    if e_info.bindingE["M1"] < coherent_sct_energy:
-                        return True
+                elif self.ptype.startswith("M"):
+                    return e_info.bindingE["M1"] < coherent_sct_energy
                 return False
-            
 
     def __repr__(self) -> str:
         return f"{self.name} {self.ptype} {self.energy} {self.ratio} {self.mu_fraction} {self.width_multi}"
@@ -1578,9 +1567,7 @@ def calculate_mu_fractions(pars, info_elements, calc_range):
                 beta = constant * f2
                 if k == 0:
                     pars[i, j].Ge_mu = (
-                        (energy * 4.0 * np.pi * beta)
-                        / (5.323 * 1.239852)
-                        * 10000.0
+                        (energy * 4.0 * np.pi * beta) / (5.323 * 1.239852) * 10000.0
                     )
                 if k == 1:
                     pars[i, j].Si_mu = (
@@ -1610,7 +1597,9 @@ def define_pileup_constants(info_elements, pileups, return_dict=False):
             elif str_list[2] == "L" or str_list[2] == "M":
                 e_1, e_2 = str_list[0], str_list[1]
             else:
-                print(f"Pileup {pileup} skipped. Currently only A_B pileups are supported.")
+                print(
+                    f"Pileup {pileup} skipped. Currently only A_B pileups are supported."
+                )
                 continue
         elif len(str_list) == 4:
             if (str_list[1] == "L" or str_list[1] == "M") and (
@@ -1618,7 +1607,9 @@ def define_pileup_constants(info_elements, pileups, return_dict=False):
             ):
                 e_1, e_2 = str_list[0], str_list[2]
             else:
-                print(f"Pileup {pileup} skipped. Currently only A_B pileups are supported.")
+                print(
+                    f"Pileup {pileup} skipped. Currently only A_B pileups are supported."
+                )
                 continue
         else:
             print(f"Pileup {pileup} skipped. Currently only A_B pileups are supported.")
@@ -1631,7 +1622,7 @@ def define_pileup_constants(info_elements, pileups, return_dict=False):
                         if info_elements[k].name == e_2:
                             for l in range(12):
                                 pileup_pars[i, l].name = pileup
-        
+
                             pileup_pars[i, 0].energy = (
                                 info_elements[j].xrf["ka1"]
                                 + info_elements[k].xrf["ka1"]
@@ -1722,11 +1713,11 @@ def define_constants(info_elements, pileups=None, return_dict=True):
                 e_pars[i, 1].type = 1
                 e_pars[i, 2].type = 2
                 e_pars[i, 3].type = 2
-                
-                e_pars[i, 0].ptype = 'Ka1'
-                e_pars[i, 1].ptype = 'Ka2'
-                e_pars[i, 2].ptype = 'Kb1'
-                e_pars[i, 3].ptype = 'Kb2'
+
+                e_pars[i, 0].ptype = "Ka1"
+                e_pars[i, 1].ptype = "Ka2"
+                e_pars[i, 2].ptype = "Kb1"
+                e_pars[i, 3].ptype = "Kb2"
 
     s_name[lele_pos] = lele
     for i in range(len(lele_pos)):
@@ -1737,7 +1728,7 @@ def define_constants(info_elements, pileups=None, return_dict=True):
             if info_elements[j].name == elname:
                 for l in range(12):
                     e_pars[ii, l].name = lele[i]
-                
+
                 e_pars[ii, 0].energy = info_elements[j].xrf["la1"]
                 e_pars[ii, 1].energy = info_elements[j].xrf["la2"]
                 e_pars[ii, 2].energy = info_elements[j].xrf["lb1"]
@@ -1799,19 +1790,19 @@ def define_constants(info_elements, pileups=None, return_dict=True):
 
                 for t in range(12):
                     e_pars[ii, t].type = 3
-                
-                e_pars[ii, 0].ptype = 'La1'
-                e_pars[ii, 1].ptype = 'La2'
-                e_pars[ii, 2].ptype = 'Lb1'
-                e_pars[ii, 3].ptype = 'Lb2'
-                e_pars[ii, 4].ptype = 'Lb3'
-                e_pars[ii, 5].ptype = 'Lb4'
-                e_pars[ii, 6].ptype = 'Lg1'
-                e_pars[ii, 7].ptype = 'Lg2'
-                e_pars[ii, 8].ptype = 'Lg3'
-                e_pars[ii, 9].ptype = 'Lg4'
-                e_pars[ii, 10].ptype = 'Ll'
-                e_pars[ii, 11].ptype = 'Ln'
+
+                e_pars[ii, 0].ptype = "La1"
+                e_pars[ii, 1].ptype = "La2"
+                e_pars[ii, 2].ptype = "Lb1"
+                e_pars[ii, 3].ptype = "Lb2"
+                e_pars[ii, 4].ptype = "Lb3"
+                e_pars[ii, 5].ptype = "Lb4"
+                e_pars[ii, 6].ptype = "Lg1"
+                e_pars[ii, 7].ptype = "Lg2"
+                e_pars[ii, 8].ptype = "Lg3"
+                e_pars[ii, 9].ptype = "Lg4"
+                e_pars[ii, 10].ptype = "Ll"
+                e_pars[ii, 11].ptype = "Ln"
 
     s_name[mele_pos] = mele
     for i in range(len(mele_pos)):
@@ -1851,11 +1842,11 @@ def define_constants(info_elements, pileups=None, return_dict=True):
                 e_pars[ii, 1].type = 7
                 e_pars[ii, 2].type = 7
                 e_pars[ii, 3].type = 7
-                
-                e_pars[ii, 0].ptype = 'Ma1'
-                e_pars[ii, 1].ptype = 'Ma2'
-                e_pars[ii, 2].ptype = 'Mb'
-                e_pars[ii, 3].ptype = 'Mg'
+
+                e_pars[ii, 0].ptype = "Ma1"
+                e_pars[ii, 1].ptype = "Ma2"
+                e_pars[ii, 2].ptype = "Mb"
+                e_pars[ii, 3].ptype = "Mg"
 
     calculate_mu_fractions(
         e_pars, info_elements, np.amax(mele_pos) - np.amin(kele_pos) + 1

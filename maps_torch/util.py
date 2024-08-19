@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,16 +41,16 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
 import math
-import psutil
 import numpy as np
 import torch
 from maps_torch.constant import M_PI, ENERGY_RES_OFFSET, ENERGY_RES_SQRT
 from maps_torch.default import default_fitting_elems, default_energy_consts
+
 
 def get_channel_from_energy(energy, ev):
     for i, e in enumerate(ev):
@@ -59,7 +59,9 @@ def get_channel_from_energy(energy, ev):
     return len(ev) - 1
 
 
-def get_peak_centers(elements, coherent_sct_energy, compton_angle, e_consts=default_energy_consts):
+def get_peak_centers(
+    elements, coherent_sct_energy, compton_angle, e_consts=default_energy_consts
+):
     centers = {}
     for e in elements:
         if e == "COMPTON_AMPLITUDE":
@@ -85,17 +87,13 @@ def get_peak_ranges(
     energy_slope,
     energy_quadratic,
     energy_range,
-):  
+):
     energy = np.linspace(
         energy_range[0],
         energy_range[1] + 1,
         energy_range[1] - energy_range[0] + 1,
     )
-    ev = (
-        energy_offset
-        + energy_slope * energy
-        + energy_quadratic * (energy**2)
-    )
+    ev = energy_offset + energy_slope * energy + energy_quadratic * (energy**2)
     centers = get_peak_centers(elements, coherent_sct_energy, compton_angle)
     ranges = {}
     for p, c in centers.items():
@@ -109,78 +107,33 @@ def get_peak_ranges(
     return ranges
 
 
-def estimate_safe_tile_size(spec_vol_shape, device='cuda'):
+def estimate_gpu_tile_size(spec_vol_shape):
     """
     Estimate a safe tile size based on available memory and input shape.
-    
+
     :param spec_vol_shape: Shape of the input spec_vol (height, width, depth)
     :param device: 'cuda' or 'cpu'
     :return: Estimated safe tile size
     """
     h, w, d = spec_vol_shape
-    
-    if device == 'cuda' and torch.cuda.is_available():
-        # Get available GPU memory
-        gpu_mem = torch.cuda.get_device_properties(0).total_memory
-        available_mem = gpu_mem * 0.8  # Use 80% of available memory to be safe
-        mem_per_pixel = d * 1024
-    else:
-        # Get available system memory
-        system_mem = psutil.virtual_memory().available
-        available_mem = system_mem * 0.5  # Use 50% of available memory to be safe
-        mem_per_pixel = d * 2048
-    
+
+    # Get available GPU memory
+    gpu_mem = torch.cuda.get_device_properties(0).total_memory
+    available_mem = gpu_mem * 0.8  # Use 80% of available memory to be safe
+    mem_per_pixel = d * 2048
+
     # Calculate maximum number of pixels that can fit in memory
     max_pixels = available_mem / mem_per_pixel
-    
+
     # Calculate tile size (assuming square tiles)
     tile_size = int(math.sqrt(max_pixels))
-    
+
     # Ensure tile size is not larger than the input dimensions
     tile_size = min(tile_size, h, w)
-    
+
     # Round down to nearest multiple of 32 for GPU efficiency
     tile_size = (tile_size // 32) * 32
-    
-    return max(32, tile_size)  # Ensure minimum tile size of 32
+    res = max(32, tile_size)  # Ensure minimum tile size of 32
+    print(f"Estimated tile size: {res}")
 
-
-def estimate_n_workers(device='cuda'):
-    """
-    Estimate the number of workers based on the device and available resources.
-    
-    :param device: 'cuda' or 'cpu'
-    :return: Estimated number of workers
-    """
-    if device == 'cuda' and torch.cuda.is_available():
-        # Use number of available GPUs
-        return torch.cuda.device_count()
-    else:
-        # Use number of CPU cores, leaving some headroom
-        cpu_count = min(8, psutil.cpu_count(logical=False)-4)  # physical cores only
-        return max(1, cpu_count)  # leave at least four cores free
-
-
-def optimize_parallelization(spec_vol_shape, device='cuda'):
-    """
-    Optimize tile_size and n_workers for the given input shape and device.
-    
-    :param spec_vol_shape: Shape of the input spec_vol (height, width, depth)
-    :param device: 'cuda' or 'cpu'
-    :return: Tuple of (tile_size, n_workers)
-    """
-    tile_size = estimate_safe_tile_size(spec_vol_shape, device)
-    n_workers = estimate_n_workers(device)
-    
-    return tile_size, n_workers
-
-
-def split_into_tiles(spec_vol, tile_size):
-    """Split the spec_vol into tiles."""
-    h, w, d = spec_vol.shape
-    tiles = []
-    for i in range(0, h, tile_size):
-        for j in range(0, w, tile_size):
-            tile = spec_vol[i:i+tile_size, j:j+tile_size, :]
-            tiles.append((tile, (i, j)))
-    return tiles
+    return res
