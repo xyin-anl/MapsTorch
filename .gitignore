@@ -134,3 +134,9 @@ cython_debug/
 
 # Ignore Mac settings
 .DS_Store
+
+*.hdf5
+*.pkl
+*.npy
+*.dll
+*.exe

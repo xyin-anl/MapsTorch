@@ -177,7 +177,7 @@ def __(energy_range, int_spec_og, mo, param_default_vals, run_button):
 
 
 @app.cell
-def __(fitted_tensors, go, make_subplots, mo):
+def __(fitted_tensors, go, init_elems, make_subplots, mo):
     from maps_torch.default import default_fitting_elems
 
     amps = {p: fitted_tensors[p].item() for p in default_fitting_elems}
@@ -189,14 +189,18 @@ def __(fitted_tensors, go, make_subplots, mo):
         x=[10**v for v in amps.values()],
         y=list(amps.keys()),
         orientation='h',
-        name='Photon counts'
+        name='Photon counts',
+        marker_color=['grey' if v in init_elems else 'red' for v in amps.keys()]
     ), row=1, col=1)
     amp_fig.add_trace(go.Bar(
         x=list(amps.values()),
-        name='Log scale'
+        y=list(amps.keys()),
+        orientation='h',
+        name='Log scale',
+        marker_color=['grey' if v in init_elems else 'red' for v in amps.keys()]
     ), row=1, col=2)
     amp_fig.update_yaxes(showticklabels=False, row=1, col=2)
-
+    amp_fig.update_layout(showlegend=False)
     results_shown = True
 
     mo.ui.plotly(amp_fig)
@@ -251,11 +255,10 @@ def __(
 
 
 @app.cell
-def __(init_elems, mo, run_button):
-    mo.stop(not run_button.value)
+def __(init_elems, mo, results_shown):
     elem_selection_slider_value = 5 if len(init_elems)>0 else 12
     elem_selection_slider = mo.ui.slider(start=-len(init_elems), stop=min(40, 60-len(init_elems)), step=1, value=elem_selection_slider_value, full_width=True)
-    elem_selection_slider
+    elem_selection_slider if results_shown else None
     return elem_selection_slider, elem_selection_slider_value
 
 
@@ -320,7 +323,7 @@ def __(
     param_default_vals,
 ):
     mo.stop(not evaluate_button.value)
-    eval_iter=500
+    eval_iter=1000
     with mo.status.progress_bar(total=eval_iter) as eval_bar:
         eval_tensors, eval_spec, eval_bkg, eval_trace = fit_spec(
             int_spec_og,
@@ -343,6 +346,21 @@ def __(
 
 
 @app.cell
+def __(eval_bkg, eval_spec, go, int_spec, make_subplots, mo, np, px):
+    fit_labels=['experiment', 'background', 'fitted']
+    fit_fig = make_subplots(rows=2, cols=1)
+    spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
+
+    for i, spec in enumerate([int_spec, eval_bkg, eval_spec+eval_bkg]):
+        fit_fig.add_trace(go.Scatter(x=spec_x, y=spec, mode='lines', name=fit_labels[i], line=dict(color=px.colors.qualitative.Plotly[i])), row=1, col=1)
+        spec_log = np.log10(np.clip(spec, 0, None)+1)
+        fit_fig.add_trace(go.Scatter(x=spec_x, y=spec_log, mode='lines', showlegend=False, line=dict(color=px.colors.qualitative.Plotly[i])), row=2, col=1)
+
+    mo.ui.plotly(fit_fig)
+    return fit_fig, fit_labels, i, spec, spec_log, spec_x
+
+
+@app.cell
 def __(go, mo, traces):
     contrib_fig = go.Figure(data=traces)
     contrib_fig.update_layout(
@@ -362,6 +380,28 @@ def __(go, mo, traces):
 
 @app.cell
 def __(
+    amps,
+    dataset,
+    energy_range,
+    eval_bkg,
+    eval_spec,
+    init_elems,
+    int_spec,
+):
+    import pickle
+    output_res = {}
+    output_res['init_elems'] = init_elems
+    output_res['amps'] = amps
+    output_res['int_spec'] = int_spec
+    output_res['energy_range'] = energy_range.value
+    output_res['fit_spec'] = eval_spec
+    output_res['fit_bkg'] = eval_bkg
+    pickle.dump(output_res, open(dataset.value[0].name+'_guess_elems_res.pkl', 'wb'))
+    return output_res, pickle
+
+
+@app.cell
+def __(
     e,
     elem_colors,
     energy_range,
@@ -371,6 +411,7 @@ def __(
     go,
     int_spec_og,
     mo,
+    np,
     plot_elems,
     torch,
 ):
@@ -379,10 +420,11 @@ def __(
 
     with torch.no_grad():
         traces = []
-        base_spectrum = int_spec_og[energy_range.value[0]: energy_range.value[1] + 1]
-        traces.append(go.Scatter(y=base_spectrum, mode='lines', name='Spectrum'))
-
         res = {}
+        base_spectrum = int_spec_og[energy_range.value[0]: energy_range.value[1] + 1]
+        traces.append(go.Scatter(y=np.clip(base_spectrum-eval_bkg, 1, None), mode='lines', name='Spectrum'))
+
+
         for il, el in enumerate(plot_elems):
             if el in eval_tensors:
                 energy = torch.linspace(
@@ -403,7 +445,7 @@ def __(
                 else:
                     e_spec = model_elem_spec(eval_tensors, el, ev, device=eval_tensors[el].device)
                 res[e] = e_spec.cpu().numpy()
-                traces.append(go.Scatter(y=e_spec.cpu().numpy() + eval_bkg, mode='lines', line=dict(color=elem_colors[il]), name=el))
+                traces.append(go.Scatter(y=np.clip(e_spec.cpu().numpy(), 1, None), mode='lines', line=dict(color=elem_colors[il]), name=el))
     return (
         base_spectrum,
         compton_peak,
