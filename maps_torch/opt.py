@@ -109,7 +109,7 @@ def create_tensors(
     for p, v in default_param_vals.items():
         init_val = init_param_vals.get(p, v)
         if p in fitting_params and tune_params and p not in fixed_param_vals:
-            tensors[p] = torch.tensor(init_val, requires_grad=True, device=device)
+            tensors[p] = torch.tensor(float(init_val), requires_grad=True, device=device)
             opt_configs.append(
                 {
                     "params": tensors[p],
@@ -169,9 +169,12 @@ def fit_spec(
     device="cpu",
     status_updator=None,
     verbose=False,
+    use_finite_diff=False,
+    finite_diff_epsilon=1e-8,
 ):
     assert loss in ["mse", "l1"], "Loss function not supported"
-    assert optimizer in ["adam", "sgd"], "Optimizer not supported"
+    assert optimizer in ['adam', 'adamw'], "Optimizer not supported"
+    
     elements = [elem for elem in set(elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]) if elem in default_fitting_elems]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
 
@@ -206,51 +209,50 @@ def fit_spec(
         )
 
     if loss == "mse":
-        loss = torch.nn.MSELoss(reduction="sum")
+        loss_fn = torch.nn.MSELoss(reduction="sum")
     elif loss == "l1":
-        loss = torch.nn.L1Loss(reduction="sum")
+        loss_fn = torch.nn.L1Loss(reduction="sum")
     else:
         raise ValueError("Loss function not supported")
-
+    
     if optimizer == "adam":
-        optimizer = torch.optim.Adam(opt_configs, lr=1e-6)
-    elif optimizer == "sgd":
-        optimizer = torch.optim.SGD(opt_configs, lr=1e-6)
-    else:
-        raise ValueError("Optimizer not supported")
+        optimizer = torch.optim.Adam(opt_configs)
+    elif optimizer == "adamw":
+        optimizer = torch.optim.AdamW(opt_configs)
 
     loss_trace = []
-    for _ in trange(n_iter, disable=not progress_bar):
+    spec_fit = None
+    bkg = None
+    
+    def closure():
+        nonlocal spec_fit, bkg  # Declare as nonlocal to modify them inside the closure
         optimizer.zero_grad()
-        bkg = (
-            snip_bkg(
-                int_spec_tensor,
-                energy_range,
-                tensors["ENERGY_OFFSET"],
-                tensors["ENERGY_SLOPE"],
-                tensors["ENERGY_QUADRATIC"],
-                tensors["SNIP_WIDTH"],
-                device=device,
-            )
-            if use_snip
-            else torch.zeros_like(int_spec_tensor, device=device)
-        )
-        spec_fit = model_spec(
-            tensors,
-            energy_range,
-            elements_to_fit=elements,
-            use_step=use_step,
-            use_tail=use_tail,
-            device=device,
-        )
-        loss_val = (
-            loss(spec_fit + bkg, int_spec_tensor)
-            if indices is None
-            else loss(spec_fit[indices] + bkg[indices], int_spec_tensor[indices])
-        )
-        loss_trace.append(loss_val.item())
-        loss_val.backward()
-        optimizer.step()
+        if use_finite_diff:
+            with torch.no_grad():
+                loss_val, spec_fit, bkg = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
+                for param_name, param in tensors.items():
+                    if param.requires_grad:
+                        param_grad = torch.zeros_like(param)
+                        original_param = param.data.clone()
+                        for i in range(param.numel()):
+                            param.data.flatten()[i] += finite_diff_epsilon
+                            perturbed_loss, _, _ = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
+                            param_grad.flatten()[i] = (perturbed_loss - loss_val) / finite_diff_epsilon
+                            param.data.flatten()[i] = original_param.flatten()[i]
+                        param.grad = param_grad
+        else:
+            loss_val, spec_fit, bkg = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
+            loss_val.backward()
+        return loss_val
+
+    for _ in trange(n_iter, disable=not progress_bar):
+        try:
+            loss_val = optimizer.step(closure)
+            loss_trace.append(loss_val.item())
+        except RuntimeError as e:
+            print(f"Optimization step failed: {e}")
+            break
+        
         if status_updator is not None:
             status_updator.update()
 
@@ -260,6 +262,36 @@ def fit_spec(
         bkg.detach().cpu().numpy(),
         loss_trace,
     )
+
+
+def _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn):
+    bkg = (
+        snip_bkg(
+            int_spec_tensor,
+            energy_range,
+            tensors["ENERGY_OFFSET"],
+            tensors["ENERGY_SLOPE"],
+            tensors["ENERGY_QUADRATIC"],
+            tensors["SNIP_WIDTH"],
+            device=int_spec_tensor.device,
+        )
+        if use_snip
+        else torch.zeros_like(int_spec_tensor, device=int_spec_tensor.device)
+    )
+    spec_fit = model_spec(
+        tensors,
+        energy_range,
+        elements_to_fit=elements,
+        use_step=use_step,
+        use_tail=use_tail,
+        device=int_spec_tensor.device,
+    )
+    loss_value = (
+        loss_fn(spec_fit + bkg, int_spec_tensor)
+        if indices is None
+        else loss_fn(spec_fit[indices] + bkg[indices], int_spec_tensor[indices])
+    )
+    return loss_value, spec_fit, bkg
 
 
 # This function is not meant to be called directly by common users, but rather to be used by other functions
@@ -280,7 +312,7 @@ def _fit_spec_vol(
     use_tail=False,
     loss="mse",
     return_loss_trace=False,
-    optimizer="adam",
+    optimizer="sgd",
     use_scheduler=False,
     n_iter=1000,
     progress_bar=True,

@@ -452,7 +452,7 @@ def __(device_list, mo):
     ], justify='start', gap=5) 
     iter_slider = mo.ui.slider(value=500, start=100, stop=3000, step=50, label='number of iterations')
     loss_selection = mo.ui.dropdown(['mse', 'l1'], value='mse', label='loss')
-    optimizer_selection = mo.ui.dropdown(['adam', 'sgd'], value='adam', label='optimizer')
+    optimizer_selection = mo.ui.dropdown(['adam', 'adamw'], value='adam', label='optimizer')
     device_selection = mo.ui.dropdown(device_list, value='cpu', label='device')
     opt_options = mo.hstack([device_selection, loss_selection, optimizer_selection, iter_slider], justify='start', gap=2)
     configs = mo.vstack([model_options, opt_options])
