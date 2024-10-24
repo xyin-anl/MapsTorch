@@ -38,9 +38,8 @@ The input files are HDF5 files (preferably produced by XRFMaps). To use the apps
 * Generate maps: ```marimo run apps/generate_maps.py```
 * Visualize maps: ```marimo run apps/visualize_maps.py```
 
-## Roadmap
-- [ ] Advaned optimization examples
-- [ ] Scripting examples
+## Run scripts
+* Fit spectrum: ```python scripts/fit_spec.py DATASET.h5 -e 12.0```. For a full list of arguments, please run ```python scripts/fit_spec.py -h```
 
 ## Contact
 To report bug or suggest features/examples, please open new github Issues. To contribute to the package, please kindly fork the repository, create a new branch and then open a pull request. If you need help with the software or analyzing XRF data, please reach out to xyin@anl.gov or aglowacki@anl.gov
