@@ -86,7 +86,7 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
         * (1 - torch.cos(params["COMPTON_ANGLE"] * 2 * M_PI / 360.0))
     )
     sigma = torch.sqrt(
-        (params["FWHM_OFFSET"] / 2.3548) ** 62
+        (params["FWHM_OFFSET"] / 2.3548) ** 2
         + compton_E * 2.96 * params["FWHM_FANOPRIME"]
     )
     delta_energy = ev - compton_E

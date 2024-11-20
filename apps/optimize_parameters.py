@@ -528,7 +528,7 @@ def __(
 def __(int_spec):
     from scipy.signal import find_peaks
 
-    peaks, _ = find_peaks(int_spec, prominence=int_spec.max()/100)
+    peaks, _ = find_peaks(int_spec, prominence=int_spec.max()/200)
     return find_peaks, peaks
 
 

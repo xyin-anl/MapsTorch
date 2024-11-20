@@ -135,8 +135,26 @@ cython_debug/
 # Ignore Mac settings
 .DS_Store
 
-*.hdf5
+# Ignore data files
+bin/
+data/
 *.pkl
+*.pickle
 *.npy
-*.dll
-*.exe
+*.npz
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.hdf
+*.mat
+*.ini
+*.cfg
+*.conf
+*.log
+*.out
+*.err
+*.tmp
+*.cache
+*.lock
+*.pid
