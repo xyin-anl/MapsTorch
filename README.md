@@ -1,4 +1,7 @@
-# MapsTorch: Differentiable XRF Spectrum Fitting
+<p align="center">
+  <img src="assets/logo.png" alt="MapsTorch Logo" width="400"/>
+</p>
+
 
 X-ray fluorescence (XRF) is a popular imaging technique to analyze chemical composition and elemental distribution within samples. The process of fitting raw XRF spectra and obtaining quantified insights (i.e., mapping) is at the core of XRF analysis [1]. At the Advanced Photon Source (APS), there are large amount of diverse XRF datasets from different samples, instruments, and experimental conditions. Extensive parameter tuning is needed to obtain best results for each specific dataset. Typically, the fitting parameters such as energy calibration coefficients or gaussian parameters are tuned by beamline scientists based on their past experiences. This reduces overall throughput and potentially introduces subjective biases. We anticipate parameter tuning will become a major bottleneck especially after the APS upgrade, when the data collection rate will be ~100 times higher [2]. Therefore, it is important to develop automated XRF parameter tuning workflows. 
 
