@@ -109,7 +109,9 @@ def create_tensors(
     for p, v in default_param_vals.items():
         init_val = init_param_vals.get(p, v)
         if p in fitting_params and tune_params and p not in fixed_param_vals:
-            tensors[p] = torch.tensor(float(init_val), requires_grad=True, device=device)
+            tensors[p] = torch.tensor(
+                float(init_val), requires_grad=True, device=device
+            )
             opt_configs.append(
                 {
                     "params": tensors[p],
@@ -173,9 +175,15 @@ def fit_spec(
     finite_diff_epsilon=1e-8,
 ):
     assert loss in ["mse", "l1"], "Loss function not supported"
-    assert optimizer in ['adam', 'adamw'], "Optimizer not supported"
-    
-    elements = [elem for elem in set(elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]) if elem in default_fitting_elems]
+    assert optimizer in ["adam", "adamw"], "Optimizer not supported"
+
+    elements = [
+        elem
+        for elem in set(
+            elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+        )
+        if elem in default_fitting_elems
+    ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
 
     if device == "cuda" and not torch.cuda.is_available():
@@ -214,7 +222,7 @@ def fit_spec(
         loss_fn = torch.nn.L1Loss(reduction="sum")
     else:
         raise ValueError("Loss function not supported")
-    
+
     if optimizer == "adam":
         optimizer = torch.optim.Adam(opt_configs)
     elif optimizer == "adamw":
@@ -223,25 +231,57 @@ def fit_spec(
     loss_trace = []
     spec_fit = None
     bkg = None
-    
+
     def closure():
         nonlocal spec_fit, bkg  # Declare as nonlocal to modify them inside the closure
         optimizer.zero_grad()
         if use_finite_diff:
             with torch.no_grad():
-                loss_val, spec_fit, bkg = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
+                loss_val, spec_fit, bkg = _calculate_loss(
+                    tensors,
+                    int_spec_tensor,
+                    energy_range,
+                    elements,
+                    use_snip,
+                    use_step,
+                    use_tail,
+                    indices,
+                    loss_fn,
+                )
                 for param_name, param in tensors.items():
                     if param.requires_grad:
                         param_grad = torch.zeros_like(param)
                         original_param = param.data.clone()
                         for i in range(param.numel()):
                             param.data.flatten()[i] += finite_diff_epsilon
-                            perturbed_loss, _, _ = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
-                            param_grad.flatten()[i] = (perturbed_loss - loss_val) / finite_diff_epsilon
+                            perturbed_loss, _, _ = _calculate_loss(
+                                tensors,
+                                int_spec_tensor,
+                                energy_range,
+                                elements,
+                                use_snip,
+                                use_step,
+                                use_tail,
+                                indices,
+                                loss_fn,
+                            )
+                            param_grad.flatten()[i] = (
+                                perturbed_loss - loss_val
+                            ) / finite_diff_epsilon
                             param.data.flatten()[i] = original_param.flatten()[i]
                         param.grad = param_grad
         else:
-            loss_val, spec_fit, bkg = _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn)
+            loss_val, spec_fit, bkg = _calculate_loss(
+                tensors,
+                int_spec_tensor,
+                energy_range,
+                elements,
+                use_snip,
+                use_step,
+                use_tail,
+                indices,
+                loss_fn,
+            )
             loss_val.backward()
         return loss_val
 
@@ -252,7 +292,7 @@ def fit_spec(
         except RuntimeError as e:
             print(f"Optimization step failed: {e}")
             break
-        
+
         if status_updator is not None:
             status_updator.update()
 
@@ -264,7 +304,17 @@ def fit_spec(
     )
 
 
-def _calculate_loss(tensors, int_spec_tensor, energy_range, elements, use_snip, use_step, use_tail, indices, loss_fn):
+def _calculate_loss(
+    tensors,
+    int_spec_tensor,
+    energy_range,
+    elements,
+    use_snip,
+    use_step,
+    use_tail,
+    indices,
+    loss_fn,
+):
     bkg = (
         snip_bkg(
             int_spec_tensor,
@@ -464,9 +514,19 @@ def fit_spec_vol_amps(
     status_updator=None,
 ):
     assert torch.cuda.is_available(), "CUDA is not available"
-    
-    elements = [elem for elem in set(elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]) if elem in default_fitting_elems]
-    params = {param: param_vals[param] for param in param_vals.keys() if param in default_param_vals}
+
+    elements = [
+        elem
+        for elem in set(
+            elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+        )
+        if elem in default_fitting_elems
+    ]
+    params = {
+        param: param_vals[param]
+        for param in param_vals.keys()
+        if param in default_param_vals
+    }
     progress_bar = progress_bar if status_updator is None else False
 
     if tile_size is None:
@@ -530,12 +590,12 @@ def fit_spec_vol_amps(
 
                 # Clear CUDA cache after each tile
                 torch.cuda.empty_cache()
-    
+
     amp_dict = {elem: amp_vol[..., i] for i, elem in enumerate(elements)}
     tile_info = {
         "x_tiles": x_tiles,
         "y_tiles": y_tiles,
-        'tile_size': tile_size,
+        "tile_size": tile_size,
     }
 
     if save_fitted_spec or save_bkg or save_loss:
@@ -571,11 +631,19 @@ def fit_spec_vol_params(
     verbose=False,
     status_updator=None,
 ):
-    elements = [elem for elem in set(elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]) if elem in default_fitting_elems]
+    elements = [
+        elem
+        for elem in set(
+            elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+        )
+        if elem in default_fitting_elems
+    ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
     progress_bar = progress_bar if status_updator is None else False
 
-    min_tile_size = max(spec_vol.shape[0] // max_n_tile_side, spec_vol.shape[1] // max_n_tile_side)
+    min_tile_size = max(
+        spec_vol.shape[0] // max_n_tile_side, spec_vol.shape[1] // max_n_tile_side
+    )
     tile_size = (
         max(min_tile_size, tile_size) if tile_size is not None else min_tile_size
     )
@@ -628,7 +696,7 @@ def fit_spec_vol_params(
                     use_step=use_step,
                     use_tail=use_tail,
                     n_iter=n_iter,
-                    device='cpu',
+                    device="cpu",
                     progress_bar=False,
                     verbose=verbose,
                     status_updator=pbar if status_updator is None else status_updator,
@@ -650,7 +718,7 @@ def fit_spec_vol_params(
     tile_info = {
         "x_tiles": x_tiles,
         "y_tiles": y_tiles,
-        'tile_size': tile_size,
+        "tile_size": tile_size,
     }
 
     if save_fitted_spec or save_bkg or save_loss:
@@ -663,4 +731,3 @@ def fit_spec_vol_params(
         )
     else:
         return param_dict, tile_info, None, None, None
-

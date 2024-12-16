@@ -1,4 +1,4 @@
-'''
+"""
 Copyright (c) 2024, UChicago Argonne, LLC. All rights reserved.
 
 Copyright 2024. UChicago Argonne, LLC. This software was produced
@@ -41,7 +41,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
 LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-'''
+"""
 
 ### Initial Author <2024>: Xiangyu Yin
 
@@ -54,7 +54,9 @@ app = marimo.App(width="medium")
 @app.cell
 def __(__file__):
     import sys
-    from pathlib import Path; sys.path.append(str(Path(__file__).parent.parent.absolute()))
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).parent.parent.absolute()))
 
     from math import floor, ceil, acos, pi
     import numpy as np
@@ -62,44 +64,87 @@ def __(__file__):
     import marimo as mo
 
     from maps_torch.io import read_dataset
+
     return Path, acos, ceil, floor, mo, np, pi, px, read_dataset, sys
 
 
 @app.cell
 def __(mo):
-    dataset = mo.ui.file_browser(filetypes=['.h5', '.h50', '.h51', '.h52', '.h53', '.h54', '.h55'],
-                                 multiple=False)
+    dataset = mo.ui.file_browser(
+        filetypes=[".h5", ".h50", ".h51", ".h52", ".h53", ".h54", ".h55"],
+        multiple=False,
+    )
     mo.md(f"Please select the dataset file (h5 file) \n{dataset}")
-    return dataset,
+    return (dataset,)
 
 
 @app.cell
 def __(mo):
-    int_spec_path = mo.ui.dropdown(['MAPS/int_spec', 'MAPS/Spectra/Integrateds_Spectra/Spectra'], 
-                                   value='MAPS/int_spec',
-                                  label='Integrated spectrum location')
-    elem_path = mo.ui.dropdown(['MAPS/channel_names'], 
-                                   value='MAPS/channel_names',
-                                  label='Energy channel names location')
-    dataset_button = mo.ui.run_button(label='Load')
-    mo.hstack([int_spec_path, elem_path, dataset_button], justify='start', gap=1).right()
+    int_spec_path = mo.ui.dropdown(
+        ["MAPS/int_spec", "MAPS/Spectra/Integrateds_Spectra/Spectra"],
+        value="MAPS/int_spec",
+        label="Integrated spectrum location",
+    )
+    elem_path = mo.ui.dropdown(
+        ["MAPS/channel_names"],
+        value="MAPS/channel_names",
+        label="Energy channel names location",
+    )
+    dataset_button = mo.ui.run_button(label="Load")
+    mo.hstack(
+        [int_spec_path, elem_path, dataset_button], justify="start", gap=1
+    ).right()
     return dataset_button, elem_path, int_spec_path
 
 
 @app.cell
 def __(int_spec_og, mo):
-    energy_range = mo.ui.range_slider(start=0, stop=int_spec_og.shape[-1]-1, step=1, label='Energy range', value=[50, 1450], full_width=True)
-    return energy_range,
+    energy_range = mo.ui.range_slider(
+        start=0,
+        stop=int_spec_og.shape[-1] - 1,
+        step=1,
+        label="Energy range",
+        value=[50, 1450],
+        full_width=True,
+    )
+    return (energy_range,)
 
 
 @app.cell
 def __(energy_range, int_spec_og, mo, peaks):
-    incident_energy_slider = mo.ui.slider(start=6, stop=18, step=0.01, value=12, label='Incident Energy (keV)', full_width=True)
-    compton_peak_value = (int_spec_og.shape[-1]-1)//2 if len(peaks) < 8 else peaks[-2]
-    compton_peak_slider = mo.ui.slider(start=0, stop=int_spec_og.shape[-1]-1, step=1, value=compton_peak_value, label='Compton Peak Position', full_width=True)
-    elastic_peak_value = (int_spec_og.shape[-1]-1)//1.9 if len(peaks) < 8 else peaks[-1]
-    elastic_peak_slider = mo.ui.slider(start=0, stop=int_spec_og.shape[-1]-1, step=1, value=elastic_peak_value, label='Elastic Peak Position', full_width=True)
-    mo.vstack([incident_energy_slider, energy_range, compton_peak_slider, elastic_peak_slider])
+    incident_energy_slider = mo.ui.slider(
+        start=6,
+        stop=18,
+        step=0.01,
+        value=12,
+        label="Incident Energy (keV)",
+        full_width=True,
+    )
+    compton_peak_value = (
+        (int_spec_og.shape[-1] - 1) // 2 if len(peaks) < 8 else peaks[-2]
+    )
+    compton_peak_slider = mo.ui.slider(
+        start=0,
+        stop=int_spec_og.shape[-1] - 1,
+        step=1,
+        value=compton_peak_value,
+        label="Compton Peak Position",
+        full_width=True,
+    )
+    elastic_peak_value = (
+        (int_spec_og.shape[-1] - 1) // 1.9 if len(peaks) < 8 else peaks[-1]
+    )
+    elastic_peak_slider = mo.ui.slider(
+        start=0,
+        stop=int_spec_og.shape[-1] - 1,
+        step=1,
+        value=elastic_peak_value,
+        label="Elastic Peak Position",
+        full_width=True,
+    )
+    mo.vstack(
+        [incident_energy_slider, energy_range, compton_peak_slider, elastic_peak_slider]
+    )
     return (
         compton_peak_slider,
         compton_peak_value,
@@ -125,14 +170,50 @@ def __(
     int_spec_fig = make_subplots(rows=2, cols=1)
 
     # Add trace for the 1D data
-    int_spec_fig.append_trace(go.Scatter(x=np.arange(len(int_spec)), y=int_spec, mode='lines', name='Photon counts'), row=1, col=1)
-    int_spec_fig.append_trace(go.Scatter(x=np.arange(len(int_spec)), y=int_spec_log, mode='lines', name='Log scale'), row=2, col=1)
-    int_spec_fig.append_trace(go.Scatter(x=peaks, y=int_spec[peaks], mode='markers', marker_color='#00cc96', showlegend=False), row=1, col=1)
-    int_spec_fig.append_trace(go.Scatter(x=peaks, y=int_spec_log[peaks], mode='markers', name='Peaks', marker_color='#00cc96'), row=2, col=1)
+    int_spec_fig.append_trace(
+        go.Scatter(
+            x=np.arange(len(int_spec)), y=int_spec, mode="lines", name="Photon counts"
+        ),
+        row=1,
+        col=1,
+    )
+    int_spec_fig.append_trace(
+        go.Scatter(
+            x=np.arange(len(int_spec)), y=int_spec_log, mode="lines", name="Log scale"
+        ),
+        row=2,
+        col=1,
+    )
+    int_spec_fig.append_trace(
+        go.Scatter(
+            x=peaks,
+            y=int_spec[peaks],
+            mode="markers",
+            marker_color="#00cc96",
+            showlegend=False,
+        ),
+        row=1,
+        col=1,
+    )
+    int_spec_fig.append_trace(
+        go.Scatter(
+            x=peaks,
+            y=int_spec_log[peaks],
+            mode="markers",
+            name="Peaks",
+            marker_color="#00cc96",
+        ),
+        row=2,
+        col=1,
+    )
 
     # Add a vertical line to mark a position within the range
-    int_spec_fig.add_vline(x=compton_peak_slider.value, line_width=1, line_color="#ab63fa")
-    int_spec_fig.add_vline(x=elastic_peak_slider.value, line_width=1, line_color="#ffa15a")
+    int_spec_fig.add_vline(
+        x=compton_peak_slider.value, line_width=1, line_color="#ab63fa"
+    )
+    int_spec_fig.add_vline(
+        x=elastic_peak_slider.value, line_width=1, line_color="#ffa15a"
+    )
 
     int_spec_fig.update_layout(showlegend=False)
 
@@ -142,9 +223,10 @@ def __(
 
 @app.cell
 def __(configs, elem_selection, mo, param_selection):
-    control_panel = mo.accordion({'Elements': elem_selection,
-                           'Parameters': param_selection,
-                           'Configs': configs}, multiple=True)
+    control_panel = mo.accordion(
+        {"Elements": elem_selection, "Parameters": param_selection, "Configs": configs},
+        multiple=True,
+    )
     control_panel_shown = True
     control_panel
     return control_panel, control_panel_shown
@@ -154,7 +236,7 @@ def __(configs, elem_selection, mo, param_selection):
 def __(control_panel_shown, mo):
     run_button = mo.ui.run_button()
     run_button.right() if control_panel_shown else None
-    return run_button,
+    return (run_button,)
 
 
 @app.cell
@@ -177,15 +259,21 @@ def __(
     mo.stop(not run_button.value)
     from maps_torch.opt import fit_spec
 
-    n_iter=iter_slider.value
+    n_iter = iter_slider.value
     with mo.status.progress_bar(total=n_iter) as bar:
         fitted_tensors, fitted_spec, fitted_bkg, loss_trace = fit_spec(
             int_spec_og,
             energy_range.value,
-            elements_to_fit=[k for k,v in elem_checkboxes.items() if v.value],
-            fitting_params=[k for k,v in param_checkboxes.items() if v[0].value],
-            init_param_vals={k:float(v[2].value) for k,v in param_checkboxes.items() if v[0].value},
-            fixed_param_vals={k:float(v[2].value) for k,v in param_checkboxes.items() if v[0].value and v[1].value},
+            elements_to_fit=[k for k, v in elem_checkboxes.items() if v.value],
+            fitting_params=[k for k, v in param_checkboxes.items() if v[0].value],
+            init_param_vals={
+                k: float(v[2].value) for k, v in param_checkboxes.items() if v[0].value
+            },
+            fixed_param_vals={
+                k: float(v[2].value)
+                for k, v in param_checkboxes.items()
+                if v[0].value and v[1].value
+            },
             indices=fit_indices_list[-1],
             tune_params=True,
             init_amp=init_amp_checkbox.value,
@@ -212,14 +300,34 @@ def __(
 
 @app.cell
 def __(fitted_bkg, fitted_spec, go, int_spec, make_subplots, mo, np, px):
-    fit_labels=['experiment', 'background', 'fitted']
+    fit_labels = ["experiment", "background", "fitted"]
     fit_fig = make_subplots(rows=2, cols=1)
     spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
 
-    for i, spec in enumerate([int_spec, fitted_bkg, fitted_spec+fitted_bkg]):
-        fit_fig.add_trace(go.Scatter(x=spec_x, y=spec, mode='lines', name=fit_labels[i], line=dict(color=px.colors.qualitative.Plotly[i])), row=1, col=1)
-        spec_log = np.log10(np.clip(spec, 0, None)+1)
-        fit_fig.add_trace(go.Scatter(x=spec_x, y=spec_log, mode='lines', showlegend=False, line=dict(color=px.colors.qualitative.Plotly[i])), row=2, col=1)
+    for i, spec in enumerate([int_spec, fitted_bkg, fitted_spec + fitted_bkg]):
+        fit_fig.add_trace(
+            go.Scatter(
+                x=spec_x,
+                y=spec,
+                mode="lines",
+                name=fit_labels[i],
+                line=dict(color=px.colors.qualitative.Plotly[i]),
+            ),
+            row=1,
+            col=1,
+        )
+        spec_log = np.log10(np.clip(spec, 0, None) + 1)
+        fit_fig.add_trace(
+            go.Scatter(
+                x=spec_x,
+                y=spec_log,
+                mode="lines",
+                showlegend=False,
+                line=dict(color=px.colors.qualitative.Plotly[i]),
+            ),
+            row=2,
+            col=1,
+        )
 
     mo.ui.plotly(fit_fig)
     return fit_fig, fit_labels, i, spec, spec_log, spec_x
@@ -227,22 +335,23 @@ def __(fitted_bkg, fitted_spec, go, int_spec, make_subplots, mo, np, px):
 
 @app.cell
 def __(elem_checkboxes, fitted_tensors, go, make_subplots, mo):
-    target_elems=[k for k,v in elem_checkboxes.items() if v.value]
+    target_elems = [k for k, v in elem_checkboxes.items() if v.value]
     amps = {p: fitted_tensors[p].item() for p in target_elems}
     amps = dict(sorted(amps.items(), key=lambda item: item[1]))
 
     amp_fig = make_subplots(rows=1, cols=2)
 
-    amp_fig.add_trace(go.Bar(
-        x=[10**v for v in amps.values()],
-        y=list(amps.keys()),
-        orientation='h',
-        name='Photon counts'
-    ), row=1, col=1)
-    amp_fig.add_trace(go.Bar(
-        x=list(amps.values()),
-        name='Log scale'
-    ), row=1, col=2)
+    amp_fig.add_trace(
+        go.Bar(
+            x=[10**v for v in amps.values()],
+            y=list(amps.keys()),
+            orientation="h",
+            name="Photon counts",
+        ),
+        row=1,
+        col=1,
+    )
+    amp_fig.add_trace(go.Bar(x=list(amps.values()), name="Log scale"), row=1, col=2)
     amp_fig.update_yaxes(showticklabels=False, row=1, col=2)
     amp_fig.update_layout(showlegend=False)
 
@@ -261,7 +370,26 @@ def __(
     range_fig,
     results_shown,
 ):
-    mo.accordion({'Target ranges': mo.vstack([range_fig, mo.hstack([focus_target_switch, energy_level_slider, confirm_range_button])])}) if results_shown else None
+    (
+        mo.accordion(
+            {
+                "Target ranges": mo.vstack(
+                    [
+                        range_fig,
+                        mo.hstack(
+                            [
+                                focus_target_switch,
+                                energy_level_slider,
+                                confirm_range_button,
+                            ]
+                        ),
+                    ]
+                )
+            }
+        )
+        if results_shown
+        else None
+    )
     return
 
 
@@ -270,7 +398,10 @@ def __(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
     mo.stop(not confirm_range_button.value)
 
     fit_indices_list[-1] = elem_peak_indices
-    mo.callout('Target ranges have been updated. Please select parameters to re-run the fitting process.', kind='success')
+    mo.callout(
+        "Target ranges have been updated. Please select parameters to re-run the fitting process.",
+        kind="success",
+    )
     return
 
 
@@ -278,15 +409,18 @@ def __(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
 def __(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
     import pandas as pd
     import datetime
+
     for par, l in params_record.items():
-        if par == 'elements':
-            l.append(','.join([k for k,v in elem_checkboxes.items() if v.value]))
+        if par == "elements":
+            l.append(",".join([k for k, v in elem_checkboxes.items() if v.value]))
         else:
             l.append(fitted_tensors[par].item())
     today = datetime.date.today()
     today_string = today.strftime("%Y-%m-%d")
-    table_label = dataset.value[0].name + ' parameter tuning record '+ today_string
-    params_table = mo.ui.table(pd.DataFrame(params_record), selection='single', label=table_label)
+    table_label = dataset.value[0].name + " parameter tuning record " + today_string
+    params_table = mo.ui.table(
+        pd.DataFrame(params_record), selection="single", label=table_label
+    )
     params_table
     return (
         datetime,
@@ -302,14 +436,14 @@ def __(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
 
 @app.cell
 def __(load_params_button, params_table):
-    load_params_button.right() if len(params_table.value)>0 else None
+    load_params_button.right() if len(params_table.value) > 0 else None
     return
 
 
 @app.cell
 def __(mo):
-    load_params_button = mo.ui.button(label='Load selected parameters and re-run')
-    return load_params_button,
+    load_params_button = mo.ui.button(label="Load selected parameters and re-run")
+    return (load_params_button,)
 
 
 @app.cell
@@ -328,10 +462,30 @@ def __(
 ):
     range_fig = make_subplots(rows=2, cols=1)
 
-    for iii, specc in enumerate([int_spec, fitted_bkg, fitted_spec+fitted_bkg]):
-        range_fig.add_trace(go.Scatter(x=spec_x, y=specc, mode='lines', name=fit_labels[iii], line=dict(color=px.colors.qualitative.Plotly[iii])), row=1, col=1)
-        specc_log = np.log10(np.clip(specc, 0, None)+1)
-        range_fig.add_trace(go.Scatter(x=spec_x, y=specc_log, mode='lines', showlegend=False, line=dict(color=px.colors.qualitative.Plotly[iii])), row=2, col=1)
+    for iii, specc in enumerate([int_spec, fitted_bkg, fitted_spec + fitted_bkg]):
+        range_fig.add_trace(
+            go.Scatter(
+                x=spec_x,
+                y=specc,
+                mode="lines",
+                name=fit_labels[iii],
+                line=dict(color=px.colors.qualitative.Plotly[iii]),
+            ),
+            row=1,
+            col=1,
+        )
+        specc_log = np.log10(np.clip(specc, 0, None) + 1)
+        range_fig.add_trace(
+            go.Scatter(
+                x=spec_x,
+                y=specc_log,
+                mode="lines",
+                showlegend=False,
+                line=dict(color=px.colors.qualitative.Plotly[iii]),
+            ),
+            row=2,
+            col=1,
+        )
 
     if focus_target_switch.value:
         range_fig.update_layout(shapes=elem_peak_shapes, overwrite=True)
@@ -340,9 +494,11 @@ def __(
 
 @app.cell
 def __(mo):
-    focus_target_switch = mo.ui.switch(label='Focus on target elements', value=False)
-    energy_level_slider = mo.ui.slider(start=1, stop=6, step=1, value=1, label='Energy levels')
-    confirm_range_button = mo.ui.run_button(label='Load target ranges')
+    focus_target_switch = mo.ui.switch(label="Focus on target elements", value=False)
+    energy_level_slider = mo.ui.slider(
+        start=1, stop=6, step=1, value=1, label="Energy levels"
+    )
+    confirm_range_button = mo.ui.run_button(label="Load target ranges")
     return confirm_range_button, energy_level_slider, focus_target_switch
 
 
@@ -367,14 +523,31 @@ def __(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
             fitted_tensors["COMPTON_ANGLE"].item(),
             fitted_tensors["ENERGY_OFFSET"].item(),
             fitted_tensors["ENERGY_SLOPE"].item(),
-            fitted_tensors['ENERGY_QUADRATIC'].item(),
+            fitted_tensors["ENERGY_QUADRATIC"].item(),
             energy_range.value,
         )
         alpha = 0.2
         for p_n, r in peak_rg.items():
-            if p_n in ['COMPTON_AMPLITUDE', 'COHERENT_SCT_AMPLITUDE'] or int(p_n[-1])<energy_level_slider.value:
+            if (
+                p_n in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+                or int(p_n[-1]) < energy_level_slider.value
+            ):
                 elem_peak_indices += list(range(*r))
-                elem_peak_shapes.append(dict(type="rect", x0=r[0], x1=r[1], y0=0, y1=1, xref="x", yref="paper", fillcolor='yellow', opacity=alpha, layer="below", line_width=0))
+                elem_peak_shapes.append(
+                    dict(
+                        type="rect",
+                        x0=r[0],
+                        x1=r[1],
+                        y0=0,
+                        y1=1,
+                        xref="x",
+                        yref="paper",
+                        fillcolor="yellow",
+                        opacity=alpha,
+                        layer="below",
+                        line_width=0,
+                    )
+                )
     return (
         alpha,
         ee,
@@ -391,14 +564,14 @@ def __(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
 
 @app.cell
 def __(param_checkbox_vals, param_default_vals, params_table):
-    if len(params_table.value)>0:
+    if len(params_table.value) > 0:
         for pp in params_table.value:
             if pp in param_checkbox_vals:
                 param_checkbox_vals[pp] = float(params_table.value[pp].item())
     else:
         for pp in param_checkbox_vals:
             param_checkbox_vals[pp] = float(param_default_vals[pp])
-    return pp,
+    return (pp,)
 
 
 @app.cell
@@ -408,8 +581,10 @@ def __(elems, mo):
     elem_checkboxes = {}
     for e in default_fitting_elems:
         elem_toggle = True if e in elems else False
-        elem_checkboxes[e] = mo.ui.checkbox(label=e, value=elem_toggle) 
-    elem_selection = mo.hstack([elem_checkboxes[e] for e in default_fitting_elems], wrap=True)
+        elem_checkboxes[e] = mo.ui.checkbox(label=e, value=elem_toggle)
+    elem_selection = mo.hstack(
+        [elem_checkboxes[e] for e in default_fitting_elems], wrap=True
+    )
     return (
         default_fitting_elems,
         e,
@@ -432,29 +607,42 @@ def __(
     for p in default_fitting_params:
         param_checkboxes[p] = [
             mo.ui.checkbox(label=p, value=True),
-            mo.ui.checkbox(label='Fix'),
-            mo.ui.text(value=str(param_checkbox_vals[p]))
+            mo.ui.checkbox(label="Fix"),
+            mo.ui.text(value=str(param_checkbox_vals[p])),
         ]
 
-    param_selection = mo.vstack([mo.hstack(param_checkboxes[p], justify='start', gap=0) for p in default_fitting_params])
+    param_selection = mo.vstack(
+        [
+            mo.hstack(param_checkboxes[p], justify="start", gap=0)
+            for p in default_fitting_params
+        ]
+    )
     return p, param_checkboxes, param_selection
 
 
 @app.cell
 def __(device_list, mo):
-    init_amp_checkbox = mo.ui.checkbox(label='Initialize amplitudes', value=True)
-    use_snip_checkbox = mo.ui.checkbox(label='Use SNIP background', value=True)
-    use_step_checkbox = mo.ui.checkbox(label='Modify pearks with step', value=True)
-    model_options = mo.hstack([
-        init_amp_checkbox,
-        use_snip_checkbox,
-        use_step_checkbox
-    ], justify='start', gap=5) 
-    iter_slider = mo.ui.slider(value=500, start=100, stop=3000, step=50, label='number of iterations')
-    loss_selection = mo.ui.dropdown(['mse', 'l1'], value='mse', label='loss')
-    optimizer_selection = mo.ui.dropdown(['adam', 'adamw'], value='adam', label='optimizer')
-    device_selection = mo.ui.dropdown(device_list, value='cpu', label='device')
-    opt_options = mo.hstack([device_selection, loss_selection, optimizer_selection, iter_slider], justify='start', gap=2)
+    init_amp_checkbox = mo.ui.checkbox(label="Initialize amplitudes", value=True)
+    use_snip_checkbox = mo.ui.checkbox(label="Use SNIP background", value=True)
+    use_step_checkbox = mo.ui.checkbox(label="Modify pearks with step", value=True)
+    model_options = mo.hstack(
+        [init_amp_checkbox, use_snip_checkbox, use_step_checkbox],
+        justify="start",
+        gap=5,
+    )
+    iter_slider = mo.ui.slider(
+        value=500, start=100, stop=3000, step=50, label="number of iterations"
+    )
+    loss_selection = mo.ui.dropdown(["mse", "l1"], value="mse", label="loss")
+    optimizer_selection = mo.ui.dropdown(
+        ["adam", "adamw"], value="adam", label="optimizer"
+    )
+    device_selection = mo.ui.dropdown(device_list, value="cpu", label="device")
+    opt_options = mo.hstack(
+        [device_selection, loss_selection, optimizer_selection, iter_slider],
+        justify="start",
+        gap=2,
+    )
     configs = mo.vstack([model_options, opt_options])
     return (
         configs,
@@ -474,16 +662,16 @@ def __(device_list, mo):
 def __():
     import torch
 
-    device_list = ['cpu']
+    device_list = ["cpu"]
     if torch.cuda.is_available():
-        device_list.append('cuda')
+        device_list.append("cuda")
     return device_list, torch
 
 
 @app.cell
 def __():
     fit_indices_list = [None]
-    return fit_indices_list,
+    return (fit_indices_list,)
 
 
 @app.cell
@@ -501,15 +689,17 @@ def __(
     energy_slope = coherent_sct_energy / elastic_peak_slider.value
     compton_energy = energy_slope * compton_peak_slider.value
     try:
-        compton_angle = acos(1-511*(1/compton_energy - 1/coherent_sct_energy))*180/pi
+        compton_angle = (
+            acos(1 - 511 * (1 / compton_energy - 1 / coherent_sct_energy)) * 180 / pi
+        )
     except:
-        compton_angle = default_param_vals['COMPTON_ANGLE']
+        compton_angle = default_param_vals["COMPTON_ANGLE"]
     param_default_vals = copy(default_param_vals)
-    param_default_vals['COHERENT_SCT_ENERGY'] = coherent_sct_energy
-    param_default_vals['ENERGY_SLOPE'] = energy_slope
-    param_default_vals['COMPTON_ANGLE'] = compton_angle
+    param_default_vals["COHERENT_SCT_ENERGY"] = coherent_sct_energy
+    param_default_vals["ENERGY_SLOPE"] = energy_slope
+    param_default_vals["COMPTON_ANGLE"] = compton_angle
     param_checkbox_vals = copy(param_default_vals)
-    params_record = {p: [] for p in default_fitting_params+['elements']}
+    params_record = {p: [] for p in default_fitting_params + ["elements"]}
     return (
         coherent_sct_energy,
         compton_angle,
@@ -528,14 +718,14 @@ def __(
 def __(int_spec):
     from scipy.signal import find_peaks
 
-    peaks, _ = find_peaks(int_spec, prominence=int_spec.max()/200)
+    peaks, _ = find_peaks(int_spec, prominence=int_spec.max() / 200)
     return find_peaks, peaks
 
 
 @app.cell
 def __(energy_range, int_spec_og, np):
-    int_spec = int_spec_og[energy_range.value[0]:energy_range.value[1]+1]
-    int_spec_log = np.log10(np.clip(int_spec, 0, None)+1)
+    int_spec = int_spec_og[energy_range.value[0] : energy_range.value[1] + 1]
+    int_spec_log = np.log10(np.clip(int_spec, 0, None) + 1)
     return int_spec, int_spec_log
 
 
@@ -549,9 +739,13 @@ def __(
     read_dataset,
 ):
     mo.stop(not dataset_button.value)
-    dataset_dict = read_dataset(dataset.value[0].path, fit_elem_key=elem_path.value, int_spec_key=int_spec_path.value)
-    int_spec_og = dataset_dict['int_spec']
-    elems = dataset_dict['elems']
+    dataset_dict = read_dataset(
+        dataset.value[0].path,
+        fit_elem_key=elem_path.value,
+        int_spec_key=int_spec_path.value,
+    )
+    int_spec_og = dataset_dict["int_spec"]
+    elems = dataset_dict["elems"]
     return dataset_dict, elems, int_spec_og
 
 

@@ -2,8 +2,7 @@
   <img src="assets/logo.png" alt="MapsTorch Logo" width="400"/>
 </p>
 
-
-X-ray fluorescence (XRF) is a popular imaging technique to analyze chemical composition and elemental distribution within samples. The process of fitting raw XRF spectra and obtaining quantified insights (i.e., mapping) is at the core of XRF analysis [1]. At the Advanced Photon Source (APS), there are large amount of diverse XRF datasets from different samples, instruments, and experimental conditions. Extensive parameter tuning is needed to obtain best results for each specific dataset. Typically, the fitting parameters such as energy calibration coefficients or gaussian parameters are tuned by beamline scientists based on their past experiences. This reduces overall throughput and potentially introduces subjective biases. We anticipate parameter tuning will become a major bottleneck especially after the APS upgrade, when the data collection rate will be ~100 times higher [2]. Therefore, it is important to develop automated XRF parameter tuning workflows. 
+X-ray fluorescence (XRF) is a popular imaging technique to analyze chemical composition and elemental distribution within samples. The process of fitting raw XRF spectra and obtaining quantified insights (i.e., mapping) is at the core of XRF analysis [1]. At the Advanced Photon Source (APS), there are large amount of diverse XRF datasets from different samples, instruments, and experimental conditions. Extensive parameter tuning is needed to obtain best results for each specific dataset. Typically, the fitting parameters such as energy calibration coefficients or gaussian parameters are tuned by beamline scientists based on their past experiences. This reduces overall throughput and potentially introduces subjective biases. We anticipate parameter tuning will become a major bottleneck especially after the APS upgrade, when the data collection rate will be ~100 times higher [2]. Therefore, it is important to develop automated XRF parameter tuning workflows.
 
 The MAPS algorithm [3] and the XRF-Maps software [4] are currently utilized at the APS to analyze XRF data, requiring users to specify element types and fitting parameters for each experiment. To automatically search for optimal parameters, we present a physics-based and data-efficient differentiable modeling (DM) approach by leveraging automatic differentiation (AD) – a well-known technique in the field of machine learning [5] and has been applied to computational imaging techniques such as ptychography [6]. When solving optimization problems with complex physical models, AD can produce accurate numerical gradients for all inputs efficiently in a programmatic fashion, eliminating the need for deriving closed forms gradients or approximating finite differences. We implemented a differentiable version of the robust physics-based MAPS algorithm using PyTorch [7]. In the forward pass, each potential element’s contribution is calculated and summed to the model spectrum. Then elastic, Compton and escape amplitudes are calculated to produce the model spectrum. The resulting model spectrum is then compared to the experimental spectrum to calculate a loss, which can be backpropagated via AD. Since the amplitudes and all fitting parameters are all free parameters in the DM approach, we can optimize them simultaneously during the fitting process, thus eliminating the need of manual tuning. Besides, the framework can automatically determine which elements present in the sample (i.e., amplitudes are non-zero) from a set of potential candidates. Moreover, with the flexibility of the DM framework, it is possible to design advanced optimization routine to overcome various issues encountered in the current fitting routine and provide better fit to the experimental data. Overall, combining the solid physics foundation of the MAPS algorithm and powerful AD, the DM framework represents a promising route to lift the burden of parameter tuning and can be extended to other spectrum fitting problems such as energy-dispersive X-ray spectroscopy and electron energy loss spectroscopy.
 
@@ -15,9 +14,10 @@ The MAPS algorithm [3] and the XRF-Maps software [4] are currently utilized at t
 - [6] M Du et al., Optics Express (2021), p. 10000-100035. https://doi.org/10.1364/OE.418296
 - [7] A Paszke et al., NeurIPS (2019), p. 8024–8035. https://dl.acm.org/doi/10.5555/3454287.3455008
 
-
 ## Setup environment
+
 Please download/clone this repository and enter the directory
+
 ```
 git clone https://github.com/xyin-anl/MapsTorch.git
 cd MapsTorch
@@ -33,19 +33,24 @@ conda activate mapstorch
 If a Nvidia GPU is available, please reinstall `torch` following https://pytorch.org/get-started/locally/ to make sure the `cuda` drivers are correctly installed.
 
 ## Prepare data
-The input files are HDF5 files (preferably produced by XRFMaps). To use the apps, the HDF5 files should at least contain the 3D spectra volume array in the ```MAPS/mca_arr``` group and the 1D integrated spectra array in the ```MAPS/int_spec``` group.
+
+The input files are HDF5 files (preferably produced by XRFMaps). To use the apps, the HDF5 files should at least contain the 3D spectra volume array in the `MAPS/mca_arr` group and the 1D integrated spectra array in the `MAPS/int_spec` group.
 
 ## Run apps
-* Guess elements: ```marimo run apps/guess_elements.py```
-* Optimize parameters: ```marimo run apps/optimize_parameters.py```
-* Generate maps: ```marimo run apps/generate_maps.py```
-* Visualize maps: ```marimo run apps/visualize_maps.py```
+
+- Guess elements: `marimo run apps/guess_elements.py`
+- Optimize parameters: `marimo run apps/optimize_parameters.py`
+- Generate maps: `marimo run apps/generate_maps.py`
+- Visualize maps: `marimo run apps/visualize_maps.py`
 
 ## Run scripts
-* Fit spectrum: ```python scripts/fit_spec.py DATASET.h5 -e 12.0```. For a full list of arguments, please run ```python scripts/fit_spec.py -h```
+
+- Fit spectrum: `python scripts/fit_spec.py DATASET.h5 -e 12.0`. For a full list of arguments, please run `python scripts/fit_spec.py -h`
 
 ## Contact
+
 To report bug or suggest features/examples, please open new github Issues. To contribute to the package, please kindly fork the repository, create a new branch and then open a pull request. If you need help with the software or analyzing XRF data, please reach out to xyin@anl.gov or aglowacki@anl.gov
 
 ## Acknowledgement
+
 This research used resources of the Advanced Photon Source, an U.S. Department of Energy (DOE) Office of Science User Facility operated for the DOE Office of Science by Argonne National Laboratory under Contract No. DE-AC02-06CH11357. The authors acknowledge funding support from Argonne LDRD 2023-0049.
