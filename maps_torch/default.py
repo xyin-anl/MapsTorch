@@ -115,6 +115,20 @@ default_learning_rates = {
     "KB_F_TAIL_OFFSET": 1e-4,
 }
 
+param_name_map = {
+    "CAL_OFFSET_[E_OFFSET]": "ENERGY_OFFSET",
+    "CAL_SLOPE_[E_LINEAR]": "ENERGY_SLOPE",
+    "CAL_QUAD_[E_QUADRATIC]": "ENERGY_QUADRATIC",
+    "STEP_OFFSET": "F_STEP_OFFSET",
+    "STEP_LINEAR": "F_STEP_LINEAR",
+    "STEP_QUADRATIC": "F_STEP_QUADRATIC",
+    "COMPTON_OFFSET": "COMPTON_F_STEP",
+    "COMPTON_LINEAR": "COMPTON_F_LINEAR",
+    "COMPTON_QUADRATIC": "COMPTON_F_QUADRATIC",
+    "COMPTON_STEP": "COMPTON_F_STEP",
+    "SI_ESCAPE_ENABLE": "SI_ESCAPE",
+}
+
 # Default fitting elements
 default_K_lines = [
     "Ag",
