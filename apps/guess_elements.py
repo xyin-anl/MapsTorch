@@ -47,12 +47,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import marimo
 
-__generated_with = "0.8.0"
+__generated_with = "0.10.2"
 app = marimo.App(width="medium")
 
 
 @app.cell
-def __(__file__):
+def _(__file__):
     import sys
     from pathlib import Path
 
@@ -64,12 +64,28 @@ def __(__file__):
     import marimo as mo
 
     from maps_torch.io import read_dataset
-
-    return Path, acos, ceil, floor, mo, np, pi, px, read_dataset, sys
+    from periodic_table_widget import PeriodicTableWidget
+    from maps_torch.default import default_fitting_elems, unsupported_elements, supported_elements_mapping
+    return (
+        Path,
+        PeriodicTableWidget,
+        acos,
+        ceil,
+        default_fitting_elems,
+        floor,
+        mo,
+        np,
+        pi,
+        px,
+        read_dataset,
+        supported_elements_mapping,
+        sys,
+        unsupported_elements,
+    )
 
 
 @app.cell
-def __(mo):
+def _(mo):
     dataset = mo.ui.file_browser(
         filetypes=[".h5", ".h50", ".h51", ".h52", ".h53", ".h54", ".h55"],
         multiple=False,
@@ -79,7 +95,7 @@ def __(mo):
 
 
 @app.cell
-def __(mo):
+def _(mo):
     int_spec_path = mo.ui.dropdown(
         ["MAPS/int_spec", "MAPS/Spectra/Integrateds_Spectra/Spectra"],
         value="MAPS/int_spec",
@@ -98,7 +114,7 @@ def __(mo):
 
 
 @app.cell
-def __(int_spec_og, mo):
+def _(int_spec_og, mo):
     energy_range = mo.ui.range_slider(
         start=0,
         stop=int_spec_og.shape[-1] - 1,
@@ -111,7 +127,7 @@ def __(int_spec_og, mo):
 
 
 @app.cell
-def __(energy_range, int_spec_og, mo, peaks):
+def _(energy_range, int_spec_og, mo, peaks):
     incident_energy_slider = mo.ui.slider(
         start=6,
         stop=18,
@@ -155,7 +171,7 @@ def __(energy_range, int_spec_og, mo, peaks):
 
 
 @app.cell
-def __(
+def _(
     compton_peak_slider,
     elastic_peak_slider,
     int_spec,
@@ -224,14 +240,14 @@ def __(
 
 
 @app.cell
-def __(int_spec_fig_shown, mo):
+def _(int_spec_fig_shown, mo):
     run_button = mo.ui.run_button(label="Start guessing! This may take a while ...")
     run_button.right() if int_spec_fig_shown else None
     return (run_button,)
 
 
 @app.cell
-def __(energy_range, int_spec_og, mo, param_default_vals, run_button):
+def _(energy_range, int_spec_og, mo, param_default_vals, run_button):
     mo.stop(not run_button.value)
     import torch
     from maps_torch.opt import fit_spec
@@ -258,9 +274,14 @@ def __(energy_range, int_spec_og, mo, param_default_vals, run_button):
 
 
 @app.cell
-def __(fitted_tensors, go, init_elems, make_subplots, mo):
-    from maps_torch.default import default_fitting_elems
-
+def _(
+    default_fitting_elems,
+    fitted_tensors,
+    go,
+    init_elems,
+    make_subplots,
+    mo,
+):
     amps = {p: fitted_tensors[p].item() for p in default_fitting_elems}
     amps = dict(sorted(amps.items(), key=lambda item: item[1]))
 
@@ -293,19 +314,20 @@ def __(fitted_tensors, go, init_elems, make_subplots, mo):
     results_shown = True
 
     mo.ui.plotly(amp_fig)
-    return amp_fig, amps, default_fitting_elems, results_shown
+    return amp_fig, amps, results_shown
 
 
 @app.cell
-def __(
+def _(
+    PeriodicTableWidget,
     amps,
     default_fitting_elems,
     elem_selection_slider,
     init_elems,
     mo,
     results_shown,
+    unsupported_elements,
 ):
-    elem_checkboxes = {}
     if len(init_elems) > 0:
         init_elem_ranked = [e for e in list(amps.keys()) if e in init_elems]
         non_init_elem_ranked = [e for e in list(amps.keys()) if not e in init_elems]
@@ -326,29 +348,53 @@ def __(
         selected_elem.append("COHERENT_SCT_AMPLITUDE")
     if not "COMPTON_AMPLITUDE" in selected_elem:
         selected_elem.append("COMPTON_AMPLITUDE")
-    for e in default_fitting_elems:
-        if e in selected_elem:
-            elem_checkboxes[e] = mo.ui.checkbox(label=e, value=True)
-        else:
-            elem_checkboxes[e] = mo.ui.checkbox(label=e, value=False)
-    elem_selection = mo.hstack(
-        [elem_checkboxes[e] for e in default_fitting_elems], wrap=True
-    )
+    initial_selected_elems = set()
+    for e in selected_elem:
+        if e in default_fitting_elems and not e in ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE']:
+            initial_selected_elems.add(e.split('_')[0])
+    elem_selection = mo.ui.anywidget(PeriodicTableWidget(
+        states=1,  
+        initial_selected={se: 0 for se in initial_selected_elems},  
+        initial_disabled=unsupported_elements,  
+    ))
     elem_selection_shown = True
     elem_selection if results_shown else None
     return (
         e,
-        elem_checkboxes,
         elem_selection,
         elem_selection_shown,
         init_elem_ranked,
+        initial_selected_elems,
         non_init_elem_ranked,
         selected_elem,
     )
 
 
 @app.cell
-def __(init_elems, mo, results_shown):
+def _(
+    default_fitting_elems,
+    elem_selection,
+    mo,
+    supported_elements_mapping,
+):
+    selected_lines = ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE', 'Si_Si']
+    for select_e in elem_selection.selected_elements:
+        for l_ in supported_elements_mapping[select_e]:
+            if l_=='K':
+                selected_lines.append(select_e)
+            else:
+                selected_lines.append(select_e+'_'+l_)
+    elem_checkboxes = {}
+    for edf in default_fitting_elems:
+        if edf in selected_lines:
+            elem_checkboxes[edf] = mo.ui.checkbox(label=edf, value=True)
+        else:
+            elem_checkboxes[edf] = mo.ui.checkbox(label=edf, value=False)
+    return edf, elem_checkboxes, l_, select_e, selected_lines
+
+
+@app.cell
+def _(init_elems, mo, results_shown):
     elem_selection_slider_value = 5 if len(init_elems) > 0 else 12
     elem_selection_slider = mo.ui.slider(
         start=-len(init_elems),
@@ -362,14 +408,13 @@ def __(init_elems, mo, results_shown):
 
 
 @app.cell
-def __(elem_selection_shown, mo):
+def _(mo):
     adjust_button = mo.ui.button(label="Adjust")
-    adjust_button.right() if elem_selection_shown else None
     return (adjust_button,)
 
 
 @app.cell
-def __(colors_map, go):
+def _(colors_map, go):
     color_fig = go.Figure()
 
     for i_, e_name in enumerate(colors_map):
@@ -406,7 +451,7 @@ def __(colors_map, go):
 
 
 @app.cell
-def __(go, int_spec, int_spec_log, make_subplots, mo, peak_ranges):
+def _(go, int_spec, int_spec_log, make_subplots, mo, peak_ranges):
     peak_pos_fig = make_subplots(rows=2, cols=1)
     peak_pos_fig.add_trace(go.Scatter(y=int_spec), row=1, col=1)
     peak_pos_fig.add_trace(go.Scatter(y=int_spec_log), row=2, col=1)
@@ -419,14 +464,14 @@ def __(go, int_spec, int_spec_log, make_subplots, mo, peak_ranges):
 
 
 @app.cell
-def __(elem_selection_shown, mo):
+def _(elem_selection_shown, mo):
     evaluate_button = mo.ui.run_button(label="Evaluate")
     evaluate_button.right() if elem_selection_shown else None
     return (evaluate_button,)
 
 
 @app.cell
-def __(
+def _(
     elem_checkboxes,
     energy_range,
     evaluate_button,
@@ -464,7 +509,7 @@ def __(
 
 
 @app.cell
-def __(eval_bkg, eval_spec, go, int_spec, make_subplots, mo, np, px):
+def _(eval_bkg, eval_spec, go, int_spec, make_subplots, mo, np, px):
     fit_labels = ["experiment", "background", "fitted"]
     fit_fig = make_subplots(rows=2, cols=1)
     spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
@@ -499,7 +544,7 @@ def __(eval_bkg, eval_spec, go, int_spec, make_subplots, mo, np, px):
 
 
 @app.cell
-def __(go, mo, traces):
+def _(go, mo, traces):
     contrib_fig = go.Figure(data=traces)
     contrib_fig.update_layout(
         yaxis_type="log",
@@ -511,7 +556,7 @@ def __(go, mo, traces):
 
 
 @app.cell
-def __(
+def _(
     amps,
     dataset,
     energy_range,
@@ -534,7 +579,7 @@ def __(
 
 
 @app.cell
-def __(
+def _(
     e,
     elem_colors,
     energy_range,
@@ -613,7 +658,7 @@ def __(
 
 
 @app.cell
-def __(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
+def _(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
     adjust_button
 
     from maps_torch.util import get_peak_ranges
@@ -668,7 +713,7 @@ def __(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
 
 
 @app.cell
-def __(
+def _(
     acos,
     compton_peak_slider,
     elastic_peak_slider,
@@ -701,29 +746,22 @@ def __(
 
 
 @app.cell
-def __(int_spec):
+def _(int_spec):
     from scipy.signal import find_peaks
 
-    peaks, _ = find_peaks(int_spec, prominence=int_spec.max() / 100)
+    peaks, _ = find_peaks(int_spec, prominence=int_spec.max() / 200)
     return find_peaks, peaks
 
 
 @app.cell
-def __(energy_range, int_spec_og, np):
+def _(energy_range, int_spec_og, np):
     int_spec = int_spec_og[energy_range.value[0] : energy_range.value[1] + 1]
     int_spec_log = np.log10(np.clip(int_spec, 0, None) + 1)
     return int_spec, int_spec_log
 
 
 @app.cell
-def __(
-    dataset,
-    dataset_button,
-    elem_path,
-    int_spec_path,
-    mo,
-    read_dataset,
-):
+def _(dataset, dataset_button, elem_path, int_spec_path, mo, read_dataset):
     mo.stop(not dataset_button.value)
     if elem_path.value == "None":
         dataset_dict = read_dataset(
