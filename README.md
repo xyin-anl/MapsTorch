@@ -1,3 +1,6 @@
+> [!TIP]
+> Play with a demo dataset on [Hugging Space](https://huggingface.co/spaces/shawnyin/MapsTorch)
+
 <p align="center">
   <img src="assets/logo.png" alt="MapsTorch Logo" width="400"/>
 </p>
@@ -37,8 +40,6 @@ MapsTorch works with HDF5 files produced by [XRFMaps](https://github.com/xyin-an
 
 - Spectra volume data in `MAPS/mca_arr` group
 - Integrated spectra array in `MAPS/int_spec` group
-
-An example dataset is provided in the `assets` folder. We recommend using [H5Web](https://h5web.panosc.eu/) to view HDF5 files.
 
 For numpy array data, use the `create_dataset` function in `mapstorch.io`:
 

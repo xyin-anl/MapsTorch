@@ -701,7 +701,7 @@ def _(default_fitting_params, load_params_button, mo, param_checkbox_vals):
 def _(device_list, mo):
     init_amp_checkbox = mo.ui.checkbox(label="Initialize amplitudes", value=True)
     use_snip_checkbox = mo.ui.checkbox(label="Use SNIP background", value=True)
-    use_step_checkbox = mo.ui.checkbox(label="Modify pearks with step", value=True)
+    use_step_checkbox = mo.ui.checkbox(label="Modify peaks with step", value=True)
     model_options = mo.hstack(
         [init_amp_checkbox, use_snip_checkbox, use_step_checkbox],
         justify="start",
