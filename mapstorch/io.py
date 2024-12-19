@@ -44,14 +44,11 @@ POSSIBILITY OF SUCH DAMAGE.
 """
 
 ### Initial Author <2024>: Xiangyu Yin
-import os, sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import warnings
 import h5py
 import numpy as np
 from datetime import datetime
-from maps_torch.default import (
+from mapstorch.default import (
     default_param_vals,
     param_name_map,
     default_fitting_elems,
@@ -203,7 +200,7 @@ def write_override_params_file(
         elements: List of element names to fit
         detector_elements: Number of detector elements (default: 1)
 
-    The function will use default values from maps_torch.default for any parameters
+    The function will use default values from mapstorch.default for any parameters
     not specified in param_values.
     """
     # Validate and prepare elements list

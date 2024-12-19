@@ -54,20 +54,20 @@ app = marimo.App(width="medium")
 @app.cell
 def _(__file__):
     import sys
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).parent.parent.absolute()))
-
     from math import floor, ceil, acos, pi
     import numpy as np
     import plotly.express as px
     import marimo as mo
 
-    from maps_torch.io import read_dataset
-    from periodic_table_widget import PeriodicTableWidget
-    from maps_torch.default import default_fitting_elems, unsupported_elements, supported_elements_mapping
+    from mapstorch.io import read_dataset
+    from mapstorch.util import PeriodicTableWidget
+    from mapstorch.default import (
+        default_fitting_elems,
+        unsupported_elements,
+        supported_elements_mapping,
+    )
+
     return (
-        Path,
         PeriodicTableWidget,
         acos,
         ceil,
@@ -250,7 +250,7 @@ def _(int_spec_fig_shown, mo):
 def _(energy_range, int_spec_og, mo, param_default_vals, run_button):
     mo.stop(not run_button.value)
     import torch
-    from maps_torch.opt import fit_spec
+    from mapstorch.opt import fit_spec
 
     n_iter = 1000
     with mo.status.progress_bar(total=n_iter) as bar:
@@ -350,13 +350,18 @@ def _(
         selected_elem.append("COMPTON_AMPLITUDE")
     initial_selected_elems = set()
     for e in selected_elem:
-        if e in default_fitting_elems and not e in ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE']:
-            initial_selected_elems.add(e.split('_')[0])
-    elem_selection = mo.ui.anywidget(PeriodicTableWidget(
-        states=1,  
-        initial_selected={se: 0 for se in initial_selected_elems},  
-        initial_disabled=unsupported_elements,  
-    ))
+        if e in default_fitting_elems and not e in [
+            "COHERENT_SCT_AMPLITUDE",
+            "COMPTON_AMPLITUDE",
+        ]:
+            initial_selected_elems.add(e.split("_")[0])
+    elem_selection = mo.ui.anywidget(
+        PeriodicTableWidget(
+            states=1,
+            initial_selected={se: 0 for se in initial_selected_elems},
+            initial_disabled=unsupported_elements,
+        )
+    )
     elem_selection_shown = True
     elem_selection if results_shown else None
     return (
@@ -377,13 +382,13 @@ def _(
     mo,
     supported_elements_mapping,
 ):
-    selected_lines = ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE', 'Si_Si']
+    selected_lines = ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE", "Si_Si"]
     for select_e in elem_selection.selected_elements:
         for l_ in supported_elements_mapping[select_e]:
-            if l_=='K':
+            if l_ == "K":
                 selected_lines.append(select_e)
             else:
-                selected_lines.append(select_e+'_'+l_)
+                selected_lines.append(select_e + "_" + l_)
     elem_checkboxes = {}
     for edf in default_fitting_elems:
         if edf in selected_lines:
@@ -557,29 +562,6 @@ def _(go, mo, traces):
 
 @app.cell
 def _(
-    amps,
-    dataset,
-    energy_range,
-    eval_bkg,
-    eval_spec,
-    init_elems,
-    int_spec,
-):
-    import pickle
-
-    output_res = {}
-    output_res["init_elems"] = init_elems
-    output_res["amps"] = amps
-    output_res["int_spec"] = int_spec
-    output_res["energy_range"] = energy_range.value
-    output_res["fit_spec"] = eval_spec
-    output_res["fit_bkg"] = eval_bkg
-    pickle.dump(output_res, open(dataset.value[0].name + "_guess_elems_res.pkl", "wb"))
-    return output_res, pickle
-
-
-@app.cell
-def _(
     e,
     elem_colors,
     energy_range,
@@ -594,7 +576,7 @@ def _(
     torch,
 ):
     mo.stop(not evaluate_button.value)
-    from maps_torch.map import model_elem_spec, compton_peak, elastic_peak
+    from mapstorch.map import model_elem_spec, compton_peak, elastic_peak
 
     with torch.no_grad():
         traces = []
@@ -661,7 +643,7 @@ def _(
 def _(adjust_button, elem_checkboxes, energy_range, fitted_tensors, px):
     adjust_button
 
-    from maps_torch.util import get_peak_ranges
+    from mapstorch.util import get_peak_ranges
 
     elem_colors = px.colors.qualitative.Light24 + px.colors.qualitative.Dark24
 
@@ -720,7 +702,7 @@ def _(
     incident_energy_slider,
     pi,
 ):
-    from maps_torch.default import default_param_vals
+    from mapstorch.default import default_param_vals
 
     coherent_sct_energy = incident_energy_slider.value
     energy_slope = coherent_sct_energy / elastic_peak_slider.value

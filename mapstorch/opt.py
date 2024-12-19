@@ -52,10 +52,10 @@ from tqdm import trange, tqdm
 import torch
 from torch.cuda.amp import autocast, GradScaler
 
-from maps_torch.util import estimate_gpu_tile_size
-from maps_torch.bkg import snip_bkg
-from maps_torch.map import model_spec, model_spec_vol
-from maps_torch.default import (
+from mapstorch.util import estimate_gpu_tile_size
+from mapstorch.bkg import snip_bkg
+from mapstorch.map import model_spec, model_spec_vol
+from mapstorch.default import (
     default_fitting_elems,
     default_fitting_params,
     default_param_vals,

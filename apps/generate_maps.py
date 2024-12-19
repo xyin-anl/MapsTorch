@@ -54,10 +54,6 @@ app = marimo.App(width="medium")
 @app.cell
 def __(__file__):
     import sys, pickle
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).parent.parent.absolute()))
-
     from math import floor, ceil, acos, pi
     import numpy as np
     import pandas as pd
@@ -68,11 +64,10 @@ def __(__file__):
     import marimo as mo
     import torch
 
-    from maps_torch.io import read_dataset
-    from maps_torch.opt import fit_spec
+    from mapstorch.io import read_dataset
+    from mapstorch.opt import fit_spec
 
     return (
-        Path,
         acos,
         ceil,
         fit_spec,
@@ -321,7 +316,7 @@ def __(
     spec_vol_t,
 ):
     mo.stop(not param_maps_button.value)
-    from maps_torch.opt import fit_spec_vol_params
+    from mapstorch.opt import fit_spec_vol_params
 
     param_n_tile_side = 5
     param_tile_size = max(
@@ -430,8 +425,8 @@ def __(
     torch,
 ):
     mo.stop(not elem_maps_button.value or (not torch.cuda.is_available()))
-    from maps_torch.opt import fit_spec_vol_amps
-    from maps_torch.util import estimate_gpu_tile_size
+    from mapstorch.opt import fit_spec_vol_amps
+    from mapstorch.util import estimate_gpu_tile_size
 
     elem_tile_size = estimate_gpu_tile_size(spec_vol.shape)
     elem_x_tiles = ceil(spec_vol_t.shape[0] / elem_tile_size)

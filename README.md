@@ -2,54 +2,108 @@
   <img src="assets/logo.png" alt="MapsTorch Logo" width="400"/>
 </p>
 
-X-ray fluorescence (XRF) is a popular imaging technique to analyze chemical composition and elemental distribution within samples. The process of fitting raw XRF spectra and obtaining quantified insights (i.e., mapping) is at the core of XRF analysis [1]. At the Advanced Photon Source (APS), there are large amount of diverse XRF datasets from different samples, instruments, and experimental conditions. Extensive parameter tuning is needed to obtain best results for each specific dataset. Typically, the fitting parameters such as energy calibration coefficients or gaussian parameters are tuned by beamline scientists based on their past experiences. This reduces overall throughput and potentially introduces subjective biases. We anticipate parameter tuning will become a major bottleneck especially after the APS upgrade, when the data collection rate will be ~100 times higher [2]. Therefore, it is important to develop automated XRF parameter tuning workflows.
+## MapsTorch
 
-The MAPS algorithm [3] and the XRF-Maps software [4] are currently utilized at the APS to analyze XRF data, requiring users to specify element types and fitting parameters for each experiment. To automatically search for optimal parameters, we present a physics-based and data-efficient differentiable modeling (DM) approach by leveraging automatic differentiation (AD) – a well-known technique in the field of machine learning [5] and has been applied to computational imaging techniques such as ptychography [6]. When solving optimization problems with complex physical models, AD can produce accurate numerical gradients for all inputs efficiently in a programmatic fashion, eliminating the need for deriving closed forms gradients or approximating finite differences. We implemented a differentiable version of the robust physics-based MAPS algorithm using PyTorch [7]. In the forward pass, each potential element’s contribution is calculated and summed to the model spectrum. Then elastic, Compton and escape amplitudes are calculated to produce the model spectrum. The resulting model spectrum is then compared to the experimental spectrum to calculate a loss, which can be backpropagated via AD. Since the amplitudes and all fitting parameters are all free parameters in the DM approach, we can optimize them simultaneously during the fitting process, thus eliminating the need of manual tuning. Besides, the framework can automatically determine which elements present in the sample (i.e., amplitudes are non-zero) from a set of potential candidates. Moreover, with the flexibility of the DM framework, it is possible to design advanced optimization routine to overcome various issues encountered in the current fitting routine and provide better fit to the experimental data. Overall, combining the solid physics foundation of the MAPS algorithm and powerful AD, the DM framework represents a promising route to lift the burden of parameter tuning and can be extended to other spectrum fitting problems such as energy-dispersive X-ray spectroscopy and electron energy loss spectroscopy.
+MapsTorch is a differentiable modeling package for automating X-ray fluorescence (XRF) analysis. It combines the physics-based [MAPS](https://www.aps.anl.gov/Microscopy/Software-and-Tools-MAPS) model with PyTorch's automatic differentiation framework.
 
-- [1] T Nietzold et al., J. Vis. Exp. 132 (2018), p. e56042. https://doi.org/10.3791/56042
-- [2] The APS Upgrade: Building a Brighter Future, https://www.aps.anl.gov/APS-Upgrade (Feb 13, 2024)
-- [3] S Vogt. et al., J. Phys. IV France, 104 (2023), p. 617-622, https://doi.org/10.1051/jp4:20030156
-- [4] A Glowacki, XRF-Maps, https://doi.org/10.11578/dc.20210824.5.
-- [5] A Baydin et al., J. Mach. Learn. Res., 18 (2018), p. 1-43, http://jmlr.org/papers/v18/17-468.html
-- [6] M Du et al., Optics Express (2021), p. 10000-100035. https://doi.org/10.1364/OE.418296
-- [7] A Paszke et al., NeurIPS (2019), p. 8024–8035. https://dl.acm.org/doi/10.5555/3454287.3455008
+Key features:
 
-## Setup environment
+- Automated parameter optimization for XRF spectrum fitting
+- Automatic element detection and decision support
+- GPU acceleration support for spectrum volume fitting
+- Integration with existing [XRF-Maps](https://github.com/xyin-anl/XRF-Maps) workflows
 
-Please download/clone this repository and enter the directory
+See [extended abstract](https://academic.oup.com/mam/article/30/Supplement_1/ozae044.1017/7720325) from M&M 2024.
 
-```
-git clone https://github.com/xyin-anl/MapsTorch.git
-cd MapsTorch
-```
+## Get Started
 
-A Python environment is needed. It is recommended to use [`conda`](https://docs.conda.io/en/latest/) to create an environment.
+Latest development version:
 
 ```
-conda env create -f env.yml
-conda activate mapstorch
+pip install git+https://github.com/xyin-anl/MapsTorch.git
 ```
 
-If a Nvidia GPU is available, please reinstall `torch` following https://pytorch.org/get-started/locally/ to make sure the `cuda` drivers are correctly installed.
+Latest release version:
 
-## Prepare data
+```
+pip install mapstorch
+```
 
-The input files are HDF5 files (preferably produced by XRFMaps). To use the apps, the HDF5 files should at least contain the 3D spectra volume array in the `MAPS/mca_arr` group and the 1D integrated spectra array in the `MAPS/int_spec` group.
+_Optional:_ For GPU acceleration of spectra volume fitting, install PyTorch with CUDA support following https://pytorch.org/get-started/locally/
 
-## Run apps
+## Prepare Data
 
-- Guess elements: `marimo run apps/guess_elements.py`
-- Optimize parameters: `marimo run apps/optimize_parameters.py`
-- Generate maps: `marimo run apps/generate_maps.py`
-- Visualize maps: `marimo run apps/visualize_maps.py`
+MapsTorch works with HDF5 files produced by [XRFMaps](https://github.com/xyin-anl/XRF-Maps). The HDF5 file must contain:
 
-## Run scripts
+- Spectra volume data in `MAPS/mca_arr` group
+- Integrated spectra array in `MAPS/int_spec` group
 
-- Fit spectrum: `python scripts/fit_spec.py DATASET.h5 -e 12.0`. For a full list of arguments, please run `python scripts/fit_spec.py -h`
+An example dataset is provided in the `assets` folder. We recommend using [H5Web](https://h5web.panosc.eu/) to view HDF5 files.
+
+For numpy array data, use the `create_dataset` function in `mapstorch.io`:
+
+```python
+def create_dataset(
+    spec_vol,
+    energy_dim,
+    output_path,
+    fit_elems=None,
+    dtype=np.float32,
+    compression="gzip",
+    compression_opts=4,
+):
+    """Create an HDF5 file compatible with read_dataset function.
+
+    Args:
+        spec_vol: 3D numpy array or path to .npy file containing spectral volume
+        energy_dim: Which dimension (0,1,2) contains the energy channels
+        output_path: Path where to save the HDF5 file
+        fit_elems: Optional list of element names
+        dtype: numpy dtype for data storage (e.g. np.float32, np.float16). Default: np.float32
+        compression: Compression filter to use. Options: 'gzip', 'lzf', None. Default: 'gzip'
+        compression_opts: Compression settings. For 'gzip', this is the compression level (0-9). Default: 4
+    """
+```
+
+## Interactive Apps
+
+We provide marimo notebooks in the `apps` folder that can be run as web apps (download the notebooks and run them in a Python environment with `mapstorch` installed):
+
+### Guess elements:
+
+```
+marimo run guess_elements.py
+```
+
+[![Guessing elements](https://img.youtube.com/vi/dJQiLpy4r-Q/0.jpg)](https://www.youtube.com/watch?v=dJQiLpy4r-Q)
+
+### Optimize parameters:
+
+```
+marimo run optimize_parameters.py
+```
+
+[![Optimizing parameters](https://img.youtube.com/vi/d8Z2n-97f9Q/0.jpg)](https://www.youtube.com/watch?v=d8Z2n-97f9Q)
+
+## Example Scripts
+
+The `scripts` folder contains example scripts like `fit_spec.py` for fitting integrated spectra. Usage:
+
+```
+python fit_spec.py DATASET.h5 -e 12.0
+```
+
+For all options:
+
+```
+python scripts/fit_spec.py -h
+```
 
 ## Contact
 
-To report bug or suggest features/examples, please open new github Issues. To contribute to the package, please kindly fork the repository, create a new branch and then open a pull request. If you need help with the software or analyzing XRF data, please reach out to xyin@anl.gov or aglowacki@anl.gov
+- Bug reports and feature requests: Open GitHub Issues
+- Contributions: Fork repository, create branch, submit pull request
+- XRF analysis help: Contact xyin@anl.gov or aglowacki@anl.gov
 
 ## Acknowledgement
 

@@ -48,9 +48,9 @@ POSSIBILITY OF SUCH DAMAGE.
 import time, csv, math
 import numpy as np
 from xdrlib import *
-from pathlib import Path
+from pkg_resources import resource_filename
 
-reference_directory = str(Path(__file__).parent.parent.absolute()) + "/reference/"
+reference_directory = resource_filename("mapstorch", "reference/")
 element_henke_filename = "henke.xdr"
 element_csv_filename = "xrf_library.csv"
 

@@ -1,5 +1,4 @@
 import sys
-from pathlib import Path
 from math import acos, pi
 from copy import copy
 import argparse
@@ -13,15 +12,12 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import plotly.io as pio
 
-# Add parent directory to path for module imports
-sys.path.append(str(Path(__file__).parent.parent.absolute()))
-from maps_torch.io import read_dataset
-from maps_torch.default import (
-    default_fitting_elems,
+from mapstorch.io import read_dataset
+from mapstorch.default import (
     default_param_vals,
     default_fitting_params,
 )
-from maps_torch.opt import fit_spec
+from mapstorch.opt import fit_spec
 
 
 def main(args):

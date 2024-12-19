@@ -45,7 +45,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ### Initial Author <2024>: Xiangyu Yin
 
-from maps_torch.constant import MapsElements, define_constants
+from mapstorch.constant import MapsElements, define_constants
 
 # Lists of fitting parameters
 default_fitting_params = [

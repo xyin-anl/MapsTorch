@@ -54,20 +54,20 @@ app = marimo.App(width="medium")
 @app.cell
 def _(__file__):
     import sys
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).parent.parent.absolute()))
-
     from math import floor, ceil, acos, pi
     import numpy as np
     import plotly.express as px
     import marimo as mo
 
-    from maps_torch.io import read_dataset
-    from periodic_table_widget import PeriodicTableWidget
-    from maps_torch.default import default_fitting_elems, unsupported_elements, supported_elements_mapping
+    from mapstorch.io import read_dataset
+    from mapstorch.util import PeriodicTableWidget
+    from mapstorch.default import (
+        default_fitting_elems,
+        unsupported_elements,
+        supported_elements_mapping,
+    )
+
     return (
-        Path,
         PeriodicTableWidget,
         acos,
         ceil,
@@ -240,7 +240,11 @@ def _(
 @app.cell
 def _(configs, elem_selection, mo, param_selection):
     control_panel = mo.accordion(
-        {"Elements": elem_selection.center(), "Parameters": param_selection, "Configs": configs},
+        {
+            "Elements": elem_selection.center(),
+            "Parameters": param_selection,
+            "Configs": configs,
+        },
         multiple=True,
     )
     control_panel_shown = True
@@ -273,7 +277,7 @@ def _(
     use_step_checkbox,
 ):
     mo.stop(not run_button.value)
-    from maps_torch.opt import fit_spec
+    from mapstorch.opt import fit_spec
 
     n_iter = iter_slider.value
     with mo.status.progress_bar(total=n_iter) as bar:
@@ -435,7 +439,10 @@ def _(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
     today_string = today.strftime("%Y-%m-%d")
     table_label = dataset.value[0].name + " parameter tuning record " + today_string
     params_table = mo.ui.table(
-        pd.DataFrame(params_record), selection="single", label=table_label
+        pd.DataFrame(params_record),
+        selection="single",
+        label=table_label,
+        show_download=False,
     )
     params_table
     return (
@@ -451,15 +458,48 @@ def _(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
 
 
 @app.cell
-def _(load_params_button, params_table):
-    load_params_button.right() if len(params_table.value) > 0 else None
+def _(load_params_button, mo, params_table, save_params_button):
+    (
+        mo.hstack([save_params_button, load_params_button]).right()
+        if len(params_table.value) > 0
+        else None
+    )
     return
 
 
 @app.cell
 def _(mo):
     load_params_button = mo.ui.button(label="Load selected parameters and re-run")
-    return (load_params_button,)
+    save_params_button = mo.ui.run_button(label="Generate override params file")
+    return load_params_button, save_params_button
+
+
+@app.cell
+def _(mo, params_table, save_params_button):
+    mo.stop(not save_params_button.value)
+    from mapstorch.io import write_override_params_file
+
+    write_override_params_file(
+        "maps_fit_parameters_override.txt",
+        param_values={
+            "COHERENT_SCT_ENERGY": params_table.value.iloc[0][
+                "COHERENT_SCT_ENERGY"
+            ].item(),
+            "ENERGY_OFFSET": params_table.value.iloc[0]["ENERGY_OFFSET"].item(),
+            "ENERGY_SLOPE": params_table.value.iloc[0]["ENERGY_SLOPE"].item(),
+            "ENERGY_QUADRATIC": params_table.value.iloc[0]["ENERGY_QUADRATIC"].item(),
+            "COMPTON_ANGLE": params_table.value.iloc[0]["COMPTON_ANGLE"].item(),
+            "COMPTON_FWHM_CORR": params_table.value.iloc[0]["COMPTON_FWHM_CORR"].item(),
+            "COMPTON_HI_F_TAIL": params_table.value.iloc[0]["COMPTON_HI_F_TAIL"].item(),
+            "COMPTON_F_TAIL": params_table.value.iloc[0]["COMPTON_F_TAIL"].item(),
+            "FWHM_FANOPRIME": params_table.value.iloc[0]["FWHM_FANOPRIME"].item(),
+            "FWHM_OFFSET": params_table.value.iloc[0]["FWHM_OFFSET"].item(),
+            "F_TAIL_OFFSET": params_table.value.iloc[0]["F_TAIL_OFFSET"].item(),
+            "KB_F_TAIL_OFFSET": params_table.value.iloc[0]["KB_F_TAIL_OFFSET"].item(),
+        },
+        elements=params_table.value.iloc[0]["elements"].split(","),
+    )
+    return (write_override_params_file,)
 
 
 @app.cell
@@ -527,7 +567,7 @@ def _(fit_indices_list, focus_target_switch):
 
 @app.cell
 def _(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
-    from maps_torch.util import get_peak_ranges
+    from mapstorch.util import get_peak_ranges
 
     plot_elems = [k for k, v in elem_checkboxes.items() if v.value]
     elem_peak_indices = []
@@ -600,14 +640,16 @@ def _(
 ):
     initial_selected_elems = set()
     for e in default_fitting_elems:
-        if e in elems and not e in ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE']:
-            initial_selected_elems.add(e.split('_')[0])
+        if e in elems and not e in ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"]:
+            initial_selected_elems.add(e.split("_")[0])
 
-    elem_selection = mo.ui.anywidget(PeriodicTableWidget(
-        states=1,  
-        initial_selected={se: 0 for se in initial_selected_elems},  
-        initial_disabled=unsupported_elements,  
-    ))
+    elem_selection = mo.ui.anywidget(
+        PeriodicTableWidget(
+            states=1,
+            initial_selected={se: 0 for se in initial_selected_elems},
+            initial_disabled=unsupported_elements,
+        )
+    )
     return e, elem_selection, initial_selected_elems
 
 
@@ -618,13 +660,13 @@ def _(
     mo,
     supported_elements_mapping,
 ):
-    selected_lines = ['COHERENT_SCT_AMPLITUDE', 'COMPTON_AMPLITUDE', 'Si_Si']
+    selected_lines = ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE", "Si_Si"]
     for select_e in elem_selection.selected_elements:
         for l_ in supported_elements_mapping[select_e]:
-            if l_=='K':
+            if l_ == "K":
                 selected_lines.append(select_e)
             else:
-                selected_lines.append(select_e+'_'+l_)
+                selected_lines.append(select_e + "_" + l_)
     elem_checkboxes = {}
     for edf in default_fitting_elems:
         if edf in selected_lines:
@@ -717,7 +759,7 @@ def _(
     incident_energy_slider,
     pi,
 ):
-    from maps_torch.default import default_param_vals, default_fitting_params
+    from mapstorch.default import default_param_vals, default_fitting_params
     from copy import copy
 
     coherent_sct_energy = incident_energy_slider.value

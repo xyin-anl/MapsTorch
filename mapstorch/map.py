@@ -46,8 +46,8 @@ POSSIBILITY OF SUCH DAMAGE.
 ### Initial Author <2024>: Xiangyu Yin
 
 import torch
-from maps_torch.constant import M_PI, SQRT_2XPI, M_SQRT2
-from maps_torch.default import (
+from mapstorch.constant import M_PI, SQRT_2XPI, M_SQRT2
+from mapstorch.default import (
     default_fitting_elems,
     default_energy_consts,
     default_elem_info,

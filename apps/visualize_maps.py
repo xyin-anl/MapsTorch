@@ -54,10 +54,6 @@ app = marimo.App(width="medium")
 @app.cell
 def __(__file__):
     import os, sys, pickle
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).parent.parent.absolute()))
-
     from math import floor, ceil
     import numpy as np
     import pandas as pd
@@ -69,7 +65,6 @@ def __(__file__):
     import torch
 
     return (
-        Path,
         ceil,
         floor,
         go,
@@ -153,7 +148,7 @@ def __(energy_dimension, np, spec_vol):
 @app.cell
 def __(dataset, dataset_button, mo, spec_vol_path):
     mo.stop(not dataset_button.value)
-    from maps_torch.io import read_dataset
+    from mapstorch.io import read_dataset
 
     dataset_dict = read_dataset(dataset.value[0].path, spec_vol_key=spec_vol_path.value)
     spec_vol = dataset_dict["spec_vol"]

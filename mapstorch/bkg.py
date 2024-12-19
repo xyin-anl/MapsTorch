@@ -47,7 +47,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import torch
 import torch.nn.functional as F
-from maps_torch.constant import M_SQRT2
+from mapstorch.constant import M_SQRT2
 
 
 def snip_op(background, current_width, max_of_xmin, min_of_xmax, device):

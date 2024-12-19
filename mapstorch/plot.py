@@ -51,9 +51,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 
-from maps_torch.map import model_elem_spec, compton_peak, elastic_peak
-from maps_torch.util import get_peak_ranges
-from maps_torch.default import default_fitting_elems
+from mapstorch.map import model_elem_spec, compton_peak, elastic_peak
+from mapstorch.util import get_peak_ranges
+from mapstorch.default import default_fitting_elems
 
 
 def plot_spec_peaks(
