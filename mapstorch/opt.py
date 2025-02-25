@@ -167,6 +167,7 @@ def fit_spec(
     loss="mse",
     optimizer="adam",
     n_iter=500,
+    l1_lambda=0.0,
     progress_bar=True,
     device="cpu",
     status_updator=None,
@@ -247,6 +248,7 @@ def fit_spec(
                     use_tail,
                     indices,
                     loss_fn,
+                    l1_lambda,  
                 )
                 for param_name, param in tensors.items():
                     if param.requires_grad:
@@ -264,6 +266,7 @@ def fit_spec(
                                 use_tail,
                                 indices,
                                 loss_fn,
+                                l1_lambda,
                             )
                             param_grad.flatten()[i] = (
                                 perturbed_loss - loss_val
@@ -281,6 +284,7 @@ def fit_spec(
                 use_tail,
                 indices,
                 loss_fn,
+                l1_lambda,
             )
             loss_val.backward()
         return loss_val
@@ -314,6 +318,7 @@ def _calculate_loss(
     use_tail,
     indices,
     loss_fn,
+    l1_lambda,
 ):
     bkg = (
         snip_bkg(
@@ -336,12 +341,35 @@ def _calculate_loss(
         use_tail=use_tail,
         device=int_spec_tensor.device,
     )
-    loss_value = (
+    
+    # Calculate main loss
+    main_loss = (
         loss_fn(spec_fit + bkg, int_spec_tensor)
         if indices is None
         else loss_fn(spec_fit[indices] + bkg[indices], int_spec_tensor[indices])
     )
-    return loss_value, spec_fit, bkg
+    
+    # Only calculate L1 regularization if l1_lambda is non-zero
+    if l1_lambda > 0:
+        # Calculate the scaling factor based on spectrum intensity
+        with torch.no_grad():
+            scale_factor = (
+                loss_fn(bkg, int_spec_tensor)
+                if indices is None
+                else loss_fn(bkg[indices], int_spec_tensor[indices])
+            ) / len(elements)
+        
+        # Calculate L1 regularization
+        l1_reg = sum(
+            torch.norm(tensors[elem], p=1)
+            for elem in elements
+            if elem in tensors and tensors[elem].requires_grad
+        )
+        
+        # Apply scaled L1 regularization
+        return main_loss + (l1_lambda * scale_factor) * l1_reg, spec_fit, bkg
+    
+    return main_loss, spec_fit, bkg
 
 
 # This function is not meant to be called directly by common users, but rather to be used by other functions
