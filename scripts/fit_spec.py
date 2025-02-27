@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import plotly.io as pio
 
-from mapstorch.io import read_dataset
+from mapstorch.io import read_dataset, write_override_params_file
 from mapstorch.default import (
     default_param_vals,
     default_fitting_params,
@@ -34,6 +34,10 @@ def main(args):
     loss_selection = args.loss_selection
     device_selection = args.device_selection
     verbose = args.verbose
+    save_params = args.save_params
+    output_path = args.output_path
+    show_figures = args.show_figures
+
     # Read dataset and extract relevant data
     dataset_dict = read_dataset(
         dataset, fit_elem_key=elem_path, int_spec_key=int_spec_path
@@ -98,58 +102,81 @@ def main(args):
     amps = {p: fitted_tensors[p].item() for p in elems if p in fitted_tensors}
     amps = dict(sorted(amps.items(), key=lambda item: item[1]))
 
-    # Suppress warnings and error messages for plot display
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+    # Save override parameters if requested
+    if save_params:
+        # Extract parameter values from fitted_tensors
+        param_values = {
+            param: fitted_tensors[param].item()
+            for param in default_fitting_params
+            if param in fitted_tensors
+        }
 
-        # Plot the amplitudes
-        amp_fig = make_subplots(rows=1, cols=2)
-        amp_fig.add_trace(
-            go.Bar(
-                x=[10**v for v in amps.values()],
-                y=list(amps.keys()),
-                orientation="h",
-                name="Photon counts",
-            ),
-            row=1,
-            col=1,
+        # Get elements list
+        elements_to_save = [k for k in amps.keys()]
+
+        # Save to file
+        output_file = output_path or "maps_fit_parameters_override.txt"
+        write_override_params_file(
+            output_file, param_values=param_values, elements=elements_to_save
         )
-        amp_fig.add_trace(go.Bar(x=list(amps.values()), name="Log scale"), row=1, col=2)
-        amp_fig.update_yaxes(showticklabels=False, row=1, col=2)
-        amp_fig.update_layout(showlegend=False)
-        pio.show(amp_fig)
+        print(f"Parameters saved to {output_file}")
 
-        # Plot the fitted spectrum
-        fit_labels = ["experiment", "background", "fitted"]
-        fit_fig = make_subplots(rows=2, cols=1)
-        spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
+    # Show figures if requested
+    if show_figures:
+        # Suppress warnings and error messages for plot display
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
 
-        for i, spec in enumerate([int_spec, fitted_bkg, fitted_spec + fitted_bkg]):
-            fit_fig.add_trace(
-                go.Scatter(
-                    x=spec_x,
-                    y=spec,
-                    mode="lines",
-                    name=fit_labels[i],
-                    line=dict(color=px.colors.qualitative.Plotly[i]),
+            # Plot the amplitudes
+            amp_fig = make_subplots(rows=1, cols=2)
+            amp_fig.add_trace(
+                go.Bar(
+                    x=[10**v for v in amps.values()],
+                    y=list(amps.keys()),
+                    orientation="h",
+                    name="Photon counts",
                 ),
                 row=1,
                 col=1,
             )
-            spec_log = np.log10(np.clip(spec, 0, None) + 1)
-            fit_fig.add_trace(
-                go.Scatter(
-                    x=spec_x,
-                    y=spec_log,
-                    mode="lines",
-                    showlegend=False,
-                    line=dict(color=px.colors.qualitative.Plotly[i]),
-                ),
-                row=2,
-                col=1,
+            amp_fig.add_trace(
+                go.Bar(x=list(amps.values()), name="Log scale"), row=1, col=2
             )
+            amp_fig.update_yaxes(showticklabels=False, row=1, col=2)
+            amp_fig.update_layout(showlegend=False)
+            pio.show(amp_fig)
 
-        pio.show(fit_fig)
+            # Plot the fitted spectrum
+            fit_labels = ["experiment", "background", "fitted"]
+            fit_fig = make_subplots(rows=2, cols=1)
+            spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
+
+            for i, spec in enumerate([int_spec, fitted_bkg, fitted_spec + fitted_bkg]):
+                fit_fig.add_trace(
+                    go.Scatter(
+                        x=spec_x,
+                        y=spec,
+                        mode="lines",
+                        name=fit_labels[i],
+                        line=dict(color=px.colors.qualitative.Plotly[i]),
+                    ),
+                    row=1,
+                    col=1,
+                )
+                spec_log = np.log10(np.clip(spec, 0, None) + 1)
+                fit_fig.add_trace(
+                    go.Scatter(
+                        x=spec_x,
+                        y=spec_log,
+                        mode="lines",
+                        showlegend=False,
+                        line=dict(color=px.colors.qualitative.Plotly[i]),
+                    ),
+                    row=2,
+                    col=1,
+                )
+
+            pio.show(fit_fig)
 
 
 class CustomArgumentParser(argparse.ArgumentParser):
@@ -211,6 +238,24 @@ if __name__ == "__main__":
         type=str,
         default="cpu",
         help="Device selection for computation",
+    )
+    parser.add_argument(
+        "--save_params",
+        action="store_true",
+        default=True,
+        help="Save fitted parameters to an override file",
+    )
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        default=None,
+        help="Path to save the override parameters file (default: maps_fit_parameters_override.txt)",
+    )
+    parser.add_argument(
+        "--show_figures",
+        action="store_true",
+        default=True,
+        help="Display figures of the fitting results",
     )
 
     # Parse the arguments
