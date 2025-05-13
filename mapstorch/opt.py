@@ -61,6 +61,7 @@ from mapstorch.default import (
     default_param_vals,
     default_learning_rates,
     default_energy_consts,
+    default_elem_info,
 )
 
 
@@ -174,6 +175,8 @@ def fit_spec(
     verbose=False,
     use_finite_diff=False,
     finite_diff_epsilon=1e-8,
+    e_consts=default_energy_consts,
+    elem_info=default_elem_info,
 ):
     assert loss in ["mse", "l1"], "Loss function not supported"
     assert optimizer in ["adam", "adamw"], "Optimizer not supported"
@@ -248,7 +251,9 @@ def fit_spec(
                     use_tail,
                     indices,
                     loss_fn,
-                    l1_lambda,  
+                    l1_lambda,
+                    e_consts,
+                    elem_info,
                 )
                 for param_name, param in tensors.items():
                     if param.requires_grad:
@@ -267,6 +272,8 @@ def fit_spec(
                                 indices,
                                 loss_fn,
                                 l1_lambda,
+                                e_consts,
+                                elem_info,
                             )
                             param_grad.flatten()[i] = (
                                 perturbed_loss - loss_val
@@ -285,6 +292,8 @@ def fit_spec(
                 indices,
                 loss_fn,
                 l1_lambda,
+                e_consts,
+                elem_info,
             )
             loss_val.backward()
         return loss_val
@@ -319,6 +328,8 @@ def _calculate_loss(
     indices,
     loss_fn,
     l1_lambda,
+    e_consts,
+    elem_info,
 ):
     bkg = (
         snip_bkg(
@@ -340,15 +351,17 @@ def _calculate_loss(
         use_step=use_step,
         use_tail=use_tail,
         device=int_spec_tensor.device,
+        e_consts=e_consts,
+        elem_info=elem_info,
     )
-    
+
     # Calculate main loss
     main_loss = (
         loss_fn(spec_fit + bkg, int_spec_tensor)
         if indices is None
         else loss_fn(spec_fit[indices] + bkg[indices], int_spec_tensor[indices])
     )
-    
+
     # Only calculate L1 regularization if l1_lambda is non-zero
     if l1_lambda > 0:
         # Calculate the scaling factor based on spectrum intensity
@@ -358,17 +371,17 @@ def _calculate_loss(
                 if indices is None
                 else loss_fn(bkg[indices], int_spec_tensor[indices])
             ) / len(elements)
-        
+
         # Calculate L1 regularization
         l1_reg = sum(
             torch.norm(tensors[elem], p=1)
             for elem in elements
             if elem in tensors and tensors[elem].requires_grad
         )
-        
+
         # Apply scaled L1 regularization
         return main_loss + (l1_lambda * scale_factor) * l1_reg, spec_fit, bkg
-    
+
     return main_loss, spec_fit, bkg
 
 
