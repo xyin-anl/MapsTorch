@@ -446,3 +446,73 @@ DS_AMP_SENS_UNIT:        1"""
         f.write(final_section)
 
     return output_path
+
+
+def parse_override_params_file(file_path):
+    """Parse a maps_fit_parameters_override.txt file and return a dictionary of parameter values.
+
+    Args:
+        file_path: Path to the override parameters file
+
+    Returns:
+        dict: Dictionary of parameter values in the format used by default_param_vals
+    """
+    # Initialize dictionary for storing parameter values
+    params = {}
+
+    # Parameters to extract with their file keys and corresponding internal names
+    param_keys = {k: k for k in default_param_vals.keys()} | param_name_map
+
+    # Additional data that might be extracted
+    elements_to_fit = []
+    elements_with_pileup = []
+    detector_elements = 1
+
+    try:
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+
+            for line in lines:
+                line = line.strip()
+
+                # Skip empty lines and comment lines
+                if not line or line.startswith("   "):
+                    continue
+
+                # Extract parameter name and value
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    param = parts[0].strip()
+                    value = parts[1].strip()
+
+                    # Handle specific parameters
+                    if param == "DETECTOR_ELEMENTS":
+                        detector_elements = int(value)
+                    elif param == "ELEMENTS_TO_FIT":
+                        elements_to_fit = [
+                            e.strip() for e in value.split(",") if e.strip()
+                        ]
+                    elif param == "ELEMENTS_WITH_PILEUP":
+                        elements_with_pileup = [
+                            e.strip() for e in value.split(",") if e.strip()
+                        ]
+                    # Extract numerical parameters
+                    elif param in param_keys:
+                        internal_param = param_keys[param]
+                        try:
+                            # Convert to float
+                            params[internal_param] = float(value)
+                        except ValueError:
+                            # Skip if conversion fails
+                            pass
+    except Exception as e:
+        import warnings
+
+        warnings.warn(f"Error parsing override parameter file: {e}")
+
+    # Add additional extracted data to the returned dictionary
+    params["elements_to_fit"] = elements_to_fit
+    params["elements_with_pileup"] = elements_with_pileup
+    params["detector_elements"] = detector_elements
+
+    return params

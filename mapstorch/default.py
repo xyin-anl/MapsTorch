@@ -127,6 +127,7 @@ param_name_map = {
     "COMPTON_QUADRATIC": "COMPTON_F_QUADRATIC",
     "COMPTON_STEP": "COMPTON_F_STEP",
     "SI_ESCAPE_ENABLE": "SI_ESCAPE",
+    "GE_ESCAPE_ENABLE": "GE_ESCAPE",
 }
 
 # Default fitting elements
