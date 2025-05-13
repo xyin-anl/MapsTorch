@@ -136,8 +136,9 @@ cython_debug/
 .DS_Store
 
 # Ignore data files
-bin/
-data/
+results/*
+bin/*
+data/*
 *.pkl
 *.pickle
 *.npy
@@ -158,3 +159,11 @@ data/
 *.cache
 *.lock
 *.pid
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.json
