@@ -51,7 +51,7 @@ from mapstorch.constant import M_SQRT2
 
 
 def snip_op(background, current_width, max_of_xmin, min_of_xmax, device):
-    range_tensor = torch.arange(background.shape[-1], device=device).expand(
+    range_tensor = torch.arange(background.shape[-1], device=device, dtype=background.dtype).expand(
         background.shape
     )
     lo_index = torch.clamp(range_tensor - current_width, max_of_xmin, min_of_xmax).to(
@@ -77,7 +77,7 @@ def snip_bkg(
     device="cpu",
 ):
     xmin, xmax = er[0], er[1]
-    energy = torch.arange(spec.shape[-1], device=device).expand(spec.shape)
+    energy = torch.arange(spec.shape[-1], device=device, dtype=spec.dtype).expand(spec.shape)
     energy = e_offset + (energy * e_slope) + (energy**2 * e_quad)
     tmp = (e_offset / 2.3548) ** 2 + energy * 2.96 * e_slope
     tmp = torch.maximum(tmp, torch.zeros_like(tmp, device=device))
@@ -91,7 +91,7 @@ def snip_bkg(
     # Conv1d operation
     background = F.conv1d(
         conv_input,
-        torch.ones(1, 1, boxcar_size, device=device) / boxcar_size,
+        torch.ones(1, 1, boxcar_size, device=device, dtype=spec.dtype) / boxcar_size,
         padding="same",
     )
 
