@@ -249,7 +249,7 @@ def model_spec(
         + params["ENERGY_QUADRATIC"] * (energy**2)
     )
     for e in elements_to_fit:
-        if e in default_fitting_elems and not e in [
+        if e in e_consts and not e in [
             "COMPTON_AMPLITUDE",
             "COHERENT_SCT_AMPLITUDE",
         ]:
@@ -564,7 +564,7 @@ def model_spec_vol(
         + params["ENERGY_QUADRATIC"] * (energy**2)
     )
     for e in elements_to_fit:
-        if e in default_fitting_elems and not e in [
+        if e in e_consts and not e in [
             "COMPTON_AMPLITUDE",
             "COHERENT_SCT_AMPLITUDE",
         ]:
