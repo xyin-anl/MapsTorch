@@ -186,7 +186,7 @@ def fit_spec(
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in default_fitting_elems
+        if elem in e_consts
     ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
 
@@ -553,6 +553,7 @@ def fit_spec_vol_amps(
     save_bkg=False,
     save_loss=False,
     status_updator=None,
+    e_consts=default_energy_consts,
 ):
     assert torch.cuda.is_available(), "CUDA is not available"
 
@@ -561,7 +562,7 @@ def fit_spec_vol_amps(
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in default_fitting_elems
+        if elem in e_consts
     ]
     params = {
         param: param_vals[param]
@@ -671,13 +672,14 @@ def fit_spec_vol_params(
     save_loss=False,
     verbose=False,
     status_updator=None,
+    e_consts=default_energy_consts,
 ):
     elements = [
         elem
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in default_fitting_elems
+        if elem in e_consts
     ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
     progress_bar = progress_bar if status_updator is None else False
