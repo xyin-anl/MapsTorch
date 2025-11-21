@@ -12,11 +12,18 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import plotly.io as pio
 
-from mapstorch.io import read_dataset, write_override_params_file
+from mapstorch.io import (
+    parse_override_params_file,
+    read_dataset,
+    write_override_params_file,
+)
 from mapstorch.default import (
+    default_elem_info,
     default_param_vals,
     default_fitting_params,
+    default_energy_consts,
 )
+from mapstorch.constant import read_constants
 from mapstorch.opt import fit_spec
 
 
@@ -75,13 +82,26 @@ def main(args):
         }
     )
 
+    # Determine fitting configuration
+    elements_to_fit = elems
+    init_param_vals = param_default_vals
+    e_consts = default_energy_consts
+
+    if args.override_params_file:
+        override_params = parse_override_params_file(args.override_params_file)
+        e_consts = read_constants(args.override_params_file, default_elem_info)
+        elements_with_pileup = override_params.get("elements_with_pileup", [])
+        override_elements = override_params.get("elements_to_fit", [])
+        elements_to_fit = override_elements + elements_with_pileup or elems
+        init_param_vals = override_params
+
     # Fit the spectrum using specified parameters
     fitted_tensors, fitted_spec, fitted_bkg, _ = fit_spec(
         int_spec_og,
         energy_range,
-        elements_to_fit=elems,
+        elements_to_fit=elements_to_fit,
         fitting_params=default_fitting_params,
-        init_param_vals=param_default_vals,
+        init_param_vals=init_param_vals,
         fixed_param_vals={},
         indices=None,
         tune_params=True,
@@ -96,6 +116,7 @@ def main(args):
         device=device_selection,
         use_finite_diff=False,
         verbose=verbose,
+        e_consts=e_consts,
     )
 
     # Extract and sort amplitudes of fitted elements
@@ -195,7 +216,7 @@ if __name__ == "__main__":
         description="Function to process and fit spectrum data."
     )
     parser.add_argument("dataset", type=str, help="Path to the dataset HDF5 file")
-    parser.add_argument("-e", "--incident_energy", type=float, help="Incident energy")
+    parser.add_argument("-e", "--incident_energy", type=float, required=True, help="Incident energy")
     parser.add_argument(
         "-n", "--n_iter", type=int, default=500, help="Number of iterations for fitting"
     )
@@ -242,20 +263,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_params",
         action="store_true",
-        default=True,
+        default=False,
         help="Save fitted parameters to an override file",
     )
     parser.add_argument(
         "--output_path",
         type=str,
-        default=None,
-        help="Path to save the override parameters file (default: maps_fit_parameters_override.txt)",
+        default="maps_fit_parameters_override.txt",
+        help="Path to save the override parameters file",
     )
     parser.add_argument(
         "--show_figures",
         action="store_true",
         default=True,
         help="Display figures of the fitting results",
+    )
+    parser.add_argument(
+        "--override_params_file",
+        type=str,
+        default=None,
+        help="Path to a MAPS override parameters file used to seed fitting",
     )
 
     # Parse the arguments
