@@ -1,0 +1,26 @@
+[workspace]
+name = "mapstorch"
+version = "0.0.1"
+description = "Development environment for the MapsTorch package"
+authors = ["Xiangyu Yin <xyin@anl.gov>"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tasks]
+install = "python -m pip install -e ."
+
+[dependencies]
+h5py = "*"
+tqdm = "*"
+numpy = "<2.0.0"
+scipy = "*"
+pandas = "*"
+matplotlib = "*"
+plotly = "*"
+pip = "*"
+python = "3.10.*"
+
+[pypi-dependencies]
+anywidget = "*"
+marimo = "*"
+torch = "*"

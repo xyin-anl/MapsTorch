@@ -34,6 +34,16 @@ pip install mapstorch
 
 _Optional:_ For GPU acceleration of spectra volume fitting, install PyTorch with CUDA support following https://pytorch.org/get-started/locally/
 
+**Develop with Pixi**
+
+We keep the development environment reproducible with [Pixi](https://pixi.sh/). Once Pixi is installed:
+
+1. Resolve the environment: `pixi install`
+2. Enter the shell: `pixi shell`
+3. Install MapsTorch in editable mode: `pixi run install`
+
+After that you can run examples or scripts in the Pixi shell, e.g. `python scripts/fit_spec.py -h` or `marimo run apps/guess_elements.py`.
+
 ## Prepare Data
 
 MapsTorch works with HDF5 files produced by [XRFMaps](https://github.com/xyin-anl/XRF-Maps). The HDF5 file must contain:

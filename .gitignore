@@ -104,6 +104,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+/.pixi/
+!pixi.lock
 
 # Spyder project settings
 .spyderproject
@@ -139,6 +141,7 @@ cython_debug/
 results/*
 bin/*
 data/*
+examples/*
 *.pkl
 *.pickle
 *.npy
@@ -146,8 +149,16 @@ data/*
 *.pt
 *.pth
 *.h5
+*.h50
+*.h51
+*.h52
+*.h53
+*.h54
+*.h55
 *.hdf5
 *.hdf
+*.nc
+*.mca
 *.mat
 *.ini
 *.cfg
@@ -167,3 +178,7 @@ data/*
 *.tiff
 *.ico
 *.json
+*.txt
+
+# log
+.loglogin
