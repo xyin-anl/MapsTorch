@@ -47,12 +47,14 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import time, csv, math
 import numpy as np
+from pathlib import Path
 from xdrlib import *
-from pkg_resources import resource_filename
 
-reference_directory = resource_filename("mapstorch", "reference/")
+reference_directory = Path(__file__).resolve().parent / "reference"
 element_henke_filename = "henke.xdr"
 element_csv_filename = "xrf_library.csv"
+element_henke_path = reference_directory / element_henke_filename
+element_csv_path = reference_directory / element_csv_filename
 
 kele = [
     "Na",
@@ -200,11 +202,7 @@ def open_file_with_retry(
 
 class Henke:
     def __init__(self, filepath=None):
-        self.filepath = (
-            reference_directory + element_henke_filename
-            if filepath is None
-            else filepath
-        )
+        self.filepath = Path(filepath) if filepath is not None else element_henke_path
 
         self.compound_name = [
             "water",
@@ -801,7 +799,7 @@ class Henke:
             file = open(str(filename), "rb")
         except:
             try:
-                filename = reference_directory + element_henke_filename
+                filename = element_henke_path
                 file = open(str(filename), "rb")
             except:
                 print("Could not open file %s", filename)
@@ -1298,16 +1296,14 @@ class MapsElements:
     def get_element_info(self, filepath=None):
         nels = 100
 
-        els_file = (
-            reference_directory + element_csv_filename if filepath is None else filepath
-        )
+        els_file = Path(filepath) if filepath is not None else element_csv_path
 
         try:
             f = open(els_file, "r")
             csvf = csv.reader(f, delimiter=",")
         except:
             try:
-                els_file = "../reference/xrf_library.csv"
+                els_file = Path(__file__).resolve().parent / "reference" / "xrf_library.csv"
                 f = open(els_file, "r")
                 csvf = csv.reader(f, delimiter=",")
             except:
