@@ -3,14 +3,19 @@ from math import acos, pi
 from copy import copy
 import argparse
 import warnings
+from pathlib import Path
 
 import numpy as np
 from scipy.signal import find_peaks
 
-import plotly.express as px
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-import plotly.io as pio
+from mapstorch.plot import (
+    plot_elem_amp_rank,
+    plot_elem_peak_ranges,
+    plot_elem_spec_contribs,
+    plot_elem_peak_pos,
+    plot_spec_peaks,
+    plot_specs,
+)
 
 from mapstorch.io import (
     parse_override_params_file,
@@ -25,6 +30,19 @@ from mapstorch.default import (
 )
 from mapstorch.constant import read_constants
 from mapstorch.opt import fit_spec
+
+PLOT_NAME_ALIASES = {
+    "amp_rank": "amp_rank",
+    "specs": "specs",
+    "spec_peaks": "spec_peaks",
+    "elem_peak_ranges": "elem_peak_ranges",
+    "elem_spec_contribs": "elem_spec_contribs",
+    "elem_peak_pos": "elem_peak_pos",
+}
+CANONICAL_PLOTS = tuple(sorted(set(PLOT_NAME_ALIASES.values())))
+AVAILABLE_PLOT_CHOICES = tuple(
+    sorted(set(PLOT_NAME_ALIASES.keys()).union({"all"}))
+)
 
 
 def main(args):
@@ -43,7 +61,18 @@ def main(args):
     verbose = args.verbose
     save_params = args.save_params
     output_path = args.output_path
-    show_figures = args.show_figures
+    plots_enabled = not args.disable_plots
+    plot_output_dir = Path(args.plot_output_dir)
+    if plots_enabled:
+        plot_output_dir.mkdir(parents=True, exist_ok=True)
+    raw_plot_choices = args.plots or []
+    if "all" in raw_plot_choices:
+        plot_selections = set(CANONICAL_PLOTS)
+    else:
+        plot_selections = {
+            PLOT_NAME_ALIASES.get(choice, choice) for choice in raw_plot_choices
+        }
+        plot_selections &= set(CANONICAL_PLOTS)
 
     # Read dataset and extract relevant data
     dataset_dict = read_dataset(
@@ -142,62 +171,84 @@ def main(args):
         )
         print(f"Parameters saved to {output_file}")
 
-    # Show figures if requested
-    if show_figures:
-        # Suppress warnings and error messages for plot display
+    should_render_plots = plots_enabled and plot_selections
+
+    # Generate plots if requested
+    if should_render_plots:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
-            # Plot the amplitudes
-            amp_fig = make_subplots(rows=1, cols=2)
-            amp_fig.add_trace(
-                go.Bar(
-                    x=[10**v for v in amps.values()],
-                    y=list(amps.keys()),
-                    orientation="h",
-                    name="Photon counts",
-                ),
-                row=1,
-                col=1,
-            )
-            amp_fig.add_trace(
-                go.Bar(x=list(amps.values()), name="Log scale"), row=1, col=2
-            )
-            amp_fig.update_yaxes(showticklabels=False, row=1, col=2)
-            amp_fig.update_layout(showlegend=False)
-            pio.show(amp_fig)
+            target_elems = list(amps.keys()) or elems
 
-            # Plot the fitted spectrum
-            fit_labels = ["experiment", "background", "fitted"]
-            fit_fig = make_subplots(rows=2, cols=1)
-            spec_x = np.linspace(0, int_spec.size - 1, int_spec.size)
+            def plot_path(default_name: str) -> str:
+                return str(plot_output_dir / default_name)
 
-            for i, spec in enumerate([int_spec, fitted_bkg, fitted_spec + fitted_bkg]):
-                fit_fig.add_trace(
-                    go.Scatter(
-                        x=spec_x,
-                        y=spec,
-                        mode="lines",
-                        name=fit_labels[i],
-                        line=dict(color=px.colors.qualitative.Plotly[i]),
-                    ),
-                    row=1,
-                    col=1,
-                )
-                spec_log = np.log10(np.clip(spec, 0, None) + 1)
-                fit_fig.add_trace(
-                    go.Scatter(
-                        x=spec_x,
-                        y=spec_log,
-                        mode="lines",
-                        showlegend=False,
-                        line=dict(color=px.colors.qualitative.Plotly[i]),
-                    ),
-                    row=2,
-                    col=1,
+            if "spec_peaks" in plot_selections and int_spec.size:
+                prominence = max(float(np.max(int_spec)) / 200.0, 1.0)
+                plot_spec_peaks(
+                    int_spec,
+                    peak_half_width=5,
+                    prominence=prominence,
+                    generate_plot=True,
+                    save=True,
+                    show=False,
+                    filename=plot_path("identified_peaks.png"),
                 )
 
-            pio.show(fit_fig)
+            if "amp_rank" in plot_selections:
+                plot_elem_amp_rank(
+                    fitted_tensors,
+                    target_elems=target_elems,
+                    save=True,
+                    show=False,
+                    filename=plot_path("element_rank.png"),
+                )
+
+            if "specs" in plot_selections:
+                spectra = [int_spec, fitted_bkg, fitted_spec + fitted_bkg]
+                plot_specs(
+                    spectra,
+                    labels=["experiment", "background", "fitted"],
+                    save=True,
+                    show=False,
+                    filename=plot_path("fitting_res.png"),
+                )
+
+            if "elem_peak_ranges" in plot_selections:
+                plot_elem_peak_ranges(
+                    fitted_tensors,
+                    int_spec=int_spec_og,
+                    energy_range=energy_range,
+                    target_elems=target_elems,
+                    save=True,
+                    show=False,
+                    filename=plot_path("element_peaks.png"),
+                )
+
+            if "elem_spec_contribs" in plot_selections:
+                plot_elem_spec_contribs(
+                    fitted_tensors,
+                    int_spec=int_spec_og,
+                    energy_range=energy_range,
+                    target_elems=target_elems,
+                    elem_amps=amps,
+                    save=True,
+                    show=False,
+                    filename=plot_path("element_contribs.png"),
+                )
+            
+            if "elem_peak_pos" in plot_selections:
+                plot_elem_peak_pos(
+                    fitted_tensors,
+                    int_spec=int_spec_og,
+                    energy_range=energy_range,
+                    target_elems=target_elems,
+                    save=True,
+                    show=False,
+                    filename=plot_path("element_peak_pos.png"),
+                )
+
+            print(f"Plot outputs saved to {plot_output_dir}")
 
 
 class CustomArgumentParser(argparse.ArgumentParser):
@@ -273,10 +324,26 @@ if __name__ == "__main__":
         help="Path to save the override parameters file",
     )
     parser.add_argument(
-        "--show_figures",
+        "--plot_output_dir",
+        type=str,
+        default="plots",
+        help="Directory to store generated plots",
+    )
+    parser.add_argument(
+        "--disable_plots",
         action="store_true",
-        default=True,
-        help="Display figures of the fitting results",
+        default=False,
+        help="Skip plot generation entirely",
+    )
+    parser.add_argument(
+        "--plots",
+        nargs="+",
+        choices=AVAILABLE_PLOT_CHOICES,
+        default=["all"],
+        help=(
+            "Select which plots to generate when --disable_plots is set. "
+            "Use 'all' (default) to display every available plot."
+        ),
     )
     parser.add_argument(
         "--override_params_file",

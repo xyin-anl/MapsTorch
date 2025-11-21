@@ -47,17 +47,221 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import torch
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
+import scienceplots
+from matplotlib import colors as mcolors
+from matplotlib.transforms import blended_transform_factory
+
+plt.style.use(["science", "notebook", "retro"])
 from scipy.signal import find_peaks
 
 from mapstorch.map import model_elem_spec, compton_peak, elastic_peak
 from mapstorch.util import get_peak_ranges
 from mapstorch.default import default_fitting_elems
 
+_ELEMENT_COLOR_MAP: dict[str, tuple] = {}
+_ELEMENT_MARKER_ALPHA = 0.5
+_DEFAULT_FADE_FACTOR = 0.6
+
+
+def _format_elem_label(elem: str) -> str:
+    special = {
+        "COHERENT_SCT_AMPLITUDE": "Elastic",
+        "COMPTON_AMPLITUDE": "Compton",
+    }
+    if elem in special:
+        return special[elem]
+    token = elem.split("_")[0]
+    return token.title()
+
+
+def _get_element_color(elem: str):
+    label = _format_elem_label(elem)
+    if label not in _ELEMENT_COLOR_MAP:
+        cmap = plt.get_cmap("tab10")
+        idx = len(_ELEMENT_COLOR_MAP) % cmap.N
+        _ELEMENT_COLOR_MAP[label] = cmap(idx)
+    return _ELEMENT_COLOR_MAP[label]
+
+
+def _with_alpha(color, alpha=_ELEMENT_MARKER_ALPHA):
+    return mcolors.to_rgba(color, alpha=alpha)
+
+
+def _element_color_with_fade(elem, idx=0, fade_factor=_DEFAULT_FADE_FACTOR):
+    base_color = _get_element_color(elem)
+    if fade_factor is None:
+        scale = 1.0
+    else:
+        scale = fade_factor**idx
+    alpha = max(0.0, min(1.0, _ELEMENT_MARKER_ALPHA * scale))
+    return _with_alpha(base_color, alpha=alpha)
+
+
+def _select_target_elements(tensors, target_elems, n_elem, reverse):
+    elems = (
+        target_elems
+        if target_elems is not None
+        else [e for e in default_fitting_elems if e in tensors]
+    )
+    elems = [e for e in elems if e in tensors]
+    elems = sorted(elems, key=lambda e: tensors[e].item(), reverse=reverse)
+    if n_elem is None:
+        return elems
+    return elems[:n_elem]
+
+
+def _compute_element_ranges(tensors, elements, energy_range):
+    coherent = float(tensors["COHERENT_SCT_ENERGY"].item())
+    compton_angle = float(tensors["COMPTON_ANGLE"].item())
+    energy_offset = float(tensors["ENERGY_OFFSET"].item())
+    energy_slope = float(tensors["ENERGY_SLOPE"].item())
+    energy_quadratic = float(tensors["ENERGY_QUADRATIC"].item())
+
+    elem_ranges = {}
+    for elem in elements:
+        if elem not in default_fitting_elems:
+            continue
+        try:
+            rg = get_peak_ranges(
+                [elem],
+                coherent,
+                compton_angle,
+                energy_offset,
+                energy_slope,
+                energy_quadratic,
+                energy_range,
+            )
+        except Exception:
+            continue
+        if rg:
+            elem_ranges[elem] = rg
+    return elem_ranges
+
+
+def _build_label_entries(elem_ranges, elements):
+    labels = []
+    for elem in elements:
+        ranges = elem_ranges.get(elem)
+        if not ranges:
+            continue
+        centers = [
+            0.5 * (float(r[0]) + float(r[1])) for r in ranges.values() if r is not None
+        ]
+        if not centers:
+            continue
+        labels.append(
+            {
+                "x": centers[0],
+                "text": _format_elem_label(elem),
+                "elem": elem,
+                "color": _get_element_color(elem),
+            }
+        )
+    return labels
+
+
+def _assign_label_lanes(label_positions_px, label_widths_px, pad_px=0):
+    lanes_right_edge = []
+    assigned_lanes = []
+    for left_px, right_px in zip(
+        [x - w / 2 - pad_px for x, w in zip(label_positions_px, label_widths_px)],
+        [x + w / 2 + pad_px for x, w in zip(label_positions_px, label_widths_px)],
+    ):
+        placed = False
+        for i in range(len(lanes_right_edge)):
+            if left_px > lanes_right_edge[i]:
+                lanes_right_edge[i] = right_px
+                assigned_lanes.append(i)
+                placed = True
+                break
+        if not placed:
+            lanes_right_edge.append(right_px)
+            assigned_lanes.append(len(lanes_right_edge) - 1)
+    return assigned_lanes, len(lanes_right_edge)
+
+
+def _annotate_element_labels(
+    ax, labels, fontsize=11, draw_guides=False, fade_factor=_DEFAULT_FADE_FACTOR
+):
+    if not labels:
+        return
+    fig = ax.figure
+    try:
+        renderer = fig.canvas.get_renderer()
+    except Exception:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+
+    labels_sorted = sorted(labels, key=lambda d: d["x"])
+    widths_px = []
+    x_px = []
+    for item in labels_sorted:
+        t = plt.Text(0, 0, item["text"], fontsize=fontsize)
+        t.set_figure(fig)
+        bbox = t.get_window_extent(renderer=renderer)
+        widths_px.append(bbox.width)
+        xp = ax.transData.transform((item["x"], ax.get_ylim()[0]))[0]
+        x_px.append(xp)
+
+    lanes, nlanes = _assign_label_lanes(x_px, widths_px, pad_px=2)
+    try:
+        fig.subplots_adjust(top=max(0.75, 0.90 - (nlanes - 1) * 0.05))
+    except Exception:
+        pass
+
+    trans = blended_transform_factory(ax.transData, ax.transAxes)
+    for item, lane in zip(labels_sorted, lanes):
+        color = item.get("color", "0.3")
+        y_axes = 1.02 + 0.07 * lane
+        ax.text(
+            item["x"],
+            y_axes,
+            item["text"],
+            transform=trans,
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+            color=color,
+            clip_on=False,
+        )
+        if draw_guides:
+            guide_color = _element_color_with_fade(
+                item.get("elem", ""), 0, fade_factor=fade_factor
+            )
+            ax.axvline(item["x"], color=guide_color, lw=0.8)
+
+
+def _setup_element_plot(
+    tensors,
+    int_spec,
+    energy_range,
+    target_elems,
+    n_elem,
+    reverse,
+    *,
+    figsize=(12, 6),
+):
+    segment = int_spec[energy_range[0] : energy_range[1] + 1]
+    target_elems = _select_target_elements(
+        tensors, target_elems=target_elems, n_elem=n_elem, reverse=reverse
+    )
+    elem_ranges = _compute_element_ranges(tensors, target_elems, energy_range)
+    labels = _build_label_entries(elem_ranges, target_elems)
+    fig, axs = plt.subplots(2, figsize=figsize)
+    for ax in axs:
+        ax.plot(segment, color="gray")
+    return fig, axs, target_elems, elem_ranges, labels
+
 
 def plot_spec_peaks(
-    spec, peak_half_width=5, prominence=100, generate_plot=False, save=False, show=True
+    spec,
+    peak_half_width=5,
+    prominence=100,
+    generate_plot=False,
+    save=False,
+    show=True,
+    filename="peak_ranges.png",
 ):
     peaks, _ = find_peaks(spec, prominence=prominence)
     peak_ranges = [
@@ -68,32 +272,44 @@ def plot_spec_peaks(
         return peak_ranges
     fig, axs = plt.subplots(2, figsize=(12, 6))
     for i in range(2):
-        axs[i].plot(spec)
-        axs[i].plot(peaks, spec[peaks], "x", color="red")
+        axs[i].plot(spec, color="gray")
+        axs[i].plot(peaks, spec[peaks], "x")
         for r in peak_ranges:
-            axs[i].axvspan(r[0], r[1], facecolor="gray", alpha=0.5)
+            axs[i].axvspan(r[0], r[1], facecolor="silver", alpha=0.3)
     axs[1].set_yscale("log")
     if save:
-        plt.savefig("peak_ranges.png")
+        plt.savefig(filename)
     elif show:
         plt.show()
     plt.close()
     return fig, peak_ranges
 
 
-def plot_specs(spectra, labels=None, dataset="fitting_res.png", save=False, show=False):
+def plot_specs(spectra, labels=None, filename="fitting_res.png", save=False, show=False):
     labels = labels if labels is not None else list(range(len(spectra)))
-    fig, axs = plt.subplots(2, figsize=(8, 4))
+    fig, axs = plt.subplots(2, figsize=(12, 6))
     for i, spec in enumerate(spectra):
         i_x = np.linspace(0, spec.size - 1, spec.size)
-        axs[0].plot(i_x, spec, label=str(labels[i]))
-        axs[1].plot(i_x, spec, label=str(labels[i]))
+        label = str(labels[i])
+        label_lower = label.strip().lower()
+        special_color = None
+        if label_lower in {"experiment", "expr"}:
+            special_color = "gray"
+        elif label_lower in {"background", "bkg"}:
+            special_color = "silver"
+        line_kwargs = {"label": label}
+        if special_color is not None:
+            line_kwargs["color"] = special_color
+        for ax in axs:
+            ax.plot(i_x, spec, **line_kwargs)
+            if label_lower in {"background", "bkg"}:
+                ax.fill_between(i_x, spec, color="silver", alpha=0.5)
     axs[1].set_ylim(1, None)
     axs[1].set_yscale("log")
     plt.legend()
     plt.tight_layout()
     if save:
-        plt.savefig(dataset)
+        plt.savefig(filename)
     elif show:
         plt.show()
     plt.close()
@@ -103,8 +319,9 @@ def plot_specs(spectra, labels=None, dataset="fitting_res.png", save=False, show
 def plot_elem_amp_rank(
     tensors,
     target_elems=None,
-    dataset="element_amplitude_rank.png",
+    filename="element_amplitude_rank.png",
     keep_negtive=False,
+    fade_factor=_DEFAULT_FADE_FACTOR,
     save=False,
     show=False,
 ):
@@ -118,16 +335,22 @@ def plot_elem_amp_rank(
     else:
         amps = {p: tensors[p].item() for p in target_elems if (tensors[p].item() >= 0)}
     amps = dict(sorted(amps.items(), key=lambda item: item[1]))
+    elements = list(amps.keys())
+    values = [amps[e] for e in elements]
+    colors = [_element_color_with_fade(e, 0) for e in elements]
+    elem_labels = [_format_elem_label(e) if len(e) > 8 else e for e in elements]
 
-    fig, ax = plt.subplots(figsize=(8, 0.2 * len(amps)))
-    i_y = np.arange(len(amps))
-    ax.barh(i_y, amps.values(), color="silver")
-    ax.set_yticks(i_y, amps.keys())
+    height = max(1.5, 0.3 * max(1, len(elements)))
+    fig, ax = plt.subplots(figsize=(12, height))
+    i_y = np.arange(len(elements))
+    ax.barh(i_y, values, color=colors)
+    ax.set_yticks(i_y, elem_labels)
+    ax.tick_params(axis="y", left=False)
     ax.set_ylabel("Element Types")
     ax.set_xlabel("Fitted Amplitudes")
     plt.tight_layout()
     if save:
-        plt.savefig(dataset)
+        plt.savefig(filename)
     elif show:
         plt.show()
     plt.close()
@@ -139,55 +362,101 @@ def plot_elem_peak_ranges(
     int_spec,
     energy_range,
     target_elems=None,
-    n_elem=9,
+    n_elem=None,
     reverse=True,
-    dataset="element_peak_ranges.png",
+    filename="element_peak_ranges.png",
+    fade_factor=_DEFAULT_FADE_FACTOR,
     save=False,
     show=False,
 ):
-    target_elems = (
-        target_elems
-        if target_elems is not None
-        else [e for e in default_fitting_elems if e in tensors]
+    (
+        fig,
+        axs,
+        target_elems,
+        elem_ranges,
+        labels,
+    ) = _setup_element_plot(
+        tensors,
+        int_spec,
+        energy_range,
+        target_elems,
+        n_elem,
+        reverse,
+        figsize=(12, 6),
     )
-    target_elems = sorted(
-        target_elems, key=lambda e: tensors[e].item(), reverse=reverse
-    )[:n_elem]
-    fig, axs = plt.subplots(2, figsize=(14, 6))
-    colormap = plt.get_cmap("tab10", len(target_elems) + 1)
-    axs[0].plot(int_spec[energy_range[0] : energy_range[1] + 1], color=colormap(0))
-    axs[1].plot(int_spec[energy_range[0] : energy_range[1] + 1], color=colormap(0))
     res = {}
     for i, e in enumerate(target_elems):
         if e in default_fitting_elems:
-            rg = get_peak_ranges(
-                [e],
-                tensors["COHERENT_SCT_ENERGY"].item(),
-                tensors["COMPTON_ANGLE"].item(),
-                tensors["ENERGY_OFFSET"].item(),
-                tensors["ENERGY_SLOPE"].item(),
-                tensors["ENERGY_QUADRATIC"].item(),
-                energy_range,
-            )
+            rg = elem_ranges.get(e)
+            if rg is None:
+                continue
             res[e] = rg
-            alpha = 0.6
-            for r in rg.values():
-                axs[0].axvspan(r[0], r[1], alpha=alpha, facecolor=colormap(i + 1))
-                axs[1].axvspan(r[0], r[1], alpha=alpha, facecolor=colormap(i + 1))
-                alpha /= 1.2
+            ranges_sorted = sorted(rg.values(), key=lambda r: r[0])
+            for idx, r in enumerate(ranges_sorted):
+                color = _element_color_with_fade(e, idx, fade_factor)
+                axs[0].axvspan(r[0], r[1], facecolor=color)
+                axs[1].axvspan(r[0], r[1], facecolor=color)
     axs[1].set_ylim(1, None)
-    norm = mpl.colors.Normalize(vmin=0, vmax=len(target_elems))
-    sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
-    cbar = fig.colorbar(sm, ax=axs)
-    cbar.set_ticks(range(1 + len(target_elems)))
-    cbar.set_ticklabels(["Spectrum"] + target_elems)
+    _annotate_element_labels(axs[0], labels, fade_factor=fade_factor)
     axs[1].set_yscale("log")
     if save:
-        plt.savefig(dataset)
+        plt.savefig(filename)
     elif show:
         plt.show()
     plt.close()
     return fig, res
+
+
+def plot_elem_peak_pos(
+    tensors,
+    int_spec,
+    energy_range,
+    target_elems=None,
+    n_elem=None,
+    reverse=True,
+    filename="element_peak_positions.png",
+    include_guides=True,
+    fade_factor=_DEFAULT_FADE_FACTOR,
+    save=False,
+    show=False,
+):
+    (
+        fig,
+        axs,
+        target_elems,
+        elem_ranges,
+        labels,
+    ) = _setup_element_plot(
+        tensors,
+        int_spec,
+        energy_range,
+        target_elems,
+        n_elem,
+        reverse,
+        figsize=(12, 6),
+    )
+    for e in target_elems:
+        ranges = elem_ranges.get(e)
+        if not ranges:
+            continue
+        centers = [
+            0.5 * (float(r[0]) + float(r[1])) for r in sorted(ranges.values(), key=lambda r: r[0])
+        ]
+        for idx, center in enumerate(centers):
+            color = _element_color_with_fade(e, idx, fade_factor)
+            for ax in axs:
+                ax.axvline(center, color=color, lw=1.2)
+    axs[1].set_ylim(1, None)
+    _annotate_element_labels(
+        axs[0], labels, draw_guides=include_guides, fade_factor=fade_factor
+    )
+    axs[1].set_yscale("log")
+    if save:
+        plt.savefig(filename)
+    elif show:
+        plt.show()
+    plt.close()
+    return fig, elem_ranges
 
 
 def plot_elem_spec_contribs(
@@ -196,25 +465,29 @@ def plot_elem_spec_contribs(
     energy_range,
     target_elems=None,
     elem_amps={},
-    n_elem=9,
+    n_elem=None,
     reverse=True,
-    dataset="element_rank.png",
+    filename="element_rank.png",
+    fade_factor=_DEFAULT_FADE_FACTOR,
     save=False,
     show=False,
 ):
     with torch.no_grad():
-        target_elems = (
-            target_elems
-            if target_elems is not None
-            else [e for e in default_fitting_elems if e in tensors]
+        (
+            fig,
+            axs,
+            target_elems,
+            elem_ranges,
+            labels,
+        ) = _setup_element_plot(
+            tensors,
+            int_spec,
+            energy_range,
+            target_elems,
+            n_elem,
+            reverse,
+            figsize=(12, 6),
         )
-        target_elems = sorted(
-            target_elems, key=lambda e: tensors[e].item(), reverse=reverse
-        )[:n_elem]
-        fig, axs = plt.subplots(2, figsize=(10, 6))
-        colormap = plt.get_cmap("tab10", len(target_elems) + 1)
-        axs[0].plot(int_spec[energy_range[0] : energy_range[1] + 1], color=colormap(0))
-        axs[1].plot(int_spec[energy_range[0] : energy_range[1] + 1], color=colormap(0))
         res = {}
         for i, e in enumerate(target_elems):
             if e in default_fitting_elems and e in tensors:
@@ -239,19 +512,35 @@ def plot_elem_spec_contribs(
                 else:
                     spec = model_elem_spec(tensors, e, ev, device=tensors[e].device)
                 res[e] = spec.cpu().numpy()
-                axs[0].plot(spec.cpu().numpy(), color=colormap(i + 1))
-                axs[1].plot(spec.cpu().numpy(), color=colormap(i + 1))
+                color = _element_color_with_fade(e, 0, fade_factor)
+                axs[0].plot(spec.cpu().numpy(), color=color)
+                axs[1].plot(spec.cpu().numpy(), color=color)
                 tensors[e] = og_tensor
         axs[1].set_ylim(1, None)
-        norm = mpl.colors.Normalize(vmin=0, vmax=len(target_elems))
-        sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
-        cbar = fig.colorbar(sm, ax=axs)
-        cbar.set_ticks(range(1 + len(target_elems)))
-        cbar.set_ticklabels(["Spectrum"] + target_elems)
+        _annotate_element_labels(axs[0], labels, fade_factor=fade_factor)
         axs[1].set_yscale("log")
         if save:
-            plt.savefig(dataset)
+            plt.savefig(filename)
         elif show:
             plt.show()
         plt.close()
         return fig, res
+
+def plot_elem_markers(
+    tensors,
+    int_spec,
+    energy_range,
+    *,
+    mode="ranges",
+    fade_factor=_DEFAULT_FADE_FACTOR,
+    **kwargs,
+):
+    mode = mode.lower()
+    kwargs.setdefault("fade_factor", fade_factor)
+    if mode in ("ranges", "peak_ranges"):
+        return plot_elem_peak_ranges(tensors, int_spec, energy_range, **kwargs)
+    if mode in ("lines", "peak_pos", "positions"):
+        return plot_elem_peak_pos(tensors, int_spec, energy_range, **kwargs)
+    if mode in ("contribs", "contributions", "spec"):
+        return plot_elem_spec_contribs(tensors, int_spec, energy_range, **kwargs)
+    raise ValueError(f"Unsupported mode '{mode}'.")

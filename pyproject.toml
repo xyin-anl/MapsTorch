@@ -23,6 +23,7 @@ dependencies = [
     "plotly",
     "marimo",
     "torch",
+    "scienceplots>=2.2.0,<3",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
