@@ -186,7 +186,7 @@ def fit_spec(
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in e_consts
+        if (elem in e_consts) or (elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"])
     ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
 
@@ -562,7 +562,7 @@ def fit_spec_vol_amps(
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in e_consts
+        if elem in e_consts or (elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"])
     ]
     params = {
         param: param_vals[param]
@@ -679,7 +679,7 @@ def fit_spec_vol_params(
         for elem in set(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
-        if elem in e_consts
+        if elem in e_consts or (elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"])
     ]
     params = [param for param in set(fitting_params) if param in default_fitting_params]
     progress_bar = progress_bar if status_updator is None else False
