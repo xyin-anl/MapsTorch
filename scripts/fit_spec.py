@@ -85,7 +85,6 @@ def main(args):
 
     # Update default parameter values
     param_default_vals = copy(default_param_vals)
-    param_default_vals["COHERENT_SCT_ENERGY"] = float(coherent_sct_energy)
     heuristic_updates = (
         estimate_and_update_params(
             int_spec_og, energy_range, coherent_sct_energy, param_default_vals

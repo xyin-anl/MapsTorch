@@ -219,7 +219,7 @@ def estimate_and_update_params(
         param_reference = default_param_vals
     if coherent_sct_energy is None or coherent_sct_energy <= 0:
         return {}
-    arr = np.asarray(int_spec, dtype=float)
+    arr = np.asarray(int_spec, dtype=float).ravel()
     if arr.size == 0:
         return {}
     start = max(0, min(int(energy_range[0]), arr.size - 1))
@@ -228,57 +228,26 @@ def estimate_and_update_params(
     if roi.size < 3:
         return {}
     compton_rel, elastic_rel = _estimate_scatter_peak_indices(roi)
-    if elastic_rel is None:
-        return {}
-    elastic_idx = start + elastic_rel
-    compton_idx = start + compton_rel if compton_rel is not None else None
+    if elastic_rel is not None:
+        elastic_idx = start + elastic_rel
+    else:
+        elastic_idx = max(1, int((arr.size - 1) // 1.9))
+    if compton_rel is not None:
+        compton_idx = start + compton_rel
+    else:
+        compton_idx = max(1, int((arr.size - 1) // 2))
 
-    available = set(param_reference.keys())
-    slope_key = _select_param_key(
-        ["ENERGY_SLOPE", "CAL_SLOPE_[E_LINEAR]"], available
-    )
-    offset_key = _select_param_key(
-        ["ENERGY_OFFSET", "CAL_OFFSET_[E_OFFSET]"], available
-    )
-    quad_key = _select_param_key(
-        ["ENERGY_QUADRATIC", "CAL_QUAD_[E_QUADRATIC]"], available
-    )
-    angle_key = _select_param_key(
-        ["COMPTON_ANGLE", "SCATTER_ANGLE"], available
-    )
-
-    offset_val = _get_param_value_safe(param_reference, offset_key, 0.0)
-    quad_val = _get_param_value_safe(param_reference, quad_key, 0.0)
-
-    updates = {}
-    denom = float(elastic_idx)
-    slope_est = None
-    if slope_key and denom > 0:
-        slope_est = (
-            float(coherent_sct_energy) - offset_val - quad_val * (denom ** 2)
-        ) / denom
-        if np.isfinite(slope_est) and 0 < slope_est <= 0.1:
-            updates[slope_key] = float(slope_est)
-        else:
-            slope_est = None
-    if (
-        angle_key
-        and slope_est is not None
-        and compton_idx is not None
-        and compton_idx > 0
-    ):
-        comp_energy = offset_val + slope_est * compton_idx + quad_val * (
-            compton_idx ** 2
+    energy_slope = coherent_sct_energy / elastic_idx
+    compton_energy = energy_slope * compton_idx
+    try:
+        compton_angle = (
+            math.acos(1 - 511 * (1 / compton_energy - 1 / coherent_sct_energy)) * 180 / math.pi
         )
-        if comp_energy > 0:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                cos_term = 1 - 511 * (
-                    1 / comp_energy - 1 / float(coherent_sct_energy)
-                )
-            if np.isfinite(cos_term) and -1.0 <= cos_term <= 1.0:
-                theta_deg = float(np.degrees(np.arccos(cos_term)))
-                if np.isfinite(theta_deg):
-                    updates[angle_key] = theta_deg
+    except:
+        compton_angle = default_param_vals["COMPTON_ANGLE"]
+
+    updates = {"COHERENT_SCT_ENERGY": coherent_sct_energy, "ENERGY_SLOPE": energy_slope, "COMPTON_ANGLE": compton_angle}
+
     return updates
 
 
