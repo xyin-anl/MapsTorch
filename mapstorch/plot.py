@@ -254,37 +254,6 @@ def _setup_element_plot(
     return fig, axs, target_elems, elem_ranges, labels
 
 
-def plot_spec_peaks(
-    spec,
-    peak_half_width=5,
-    prominence=100,
-    generate_plot=False,
-    save=False,
-    show=True,
-    filename="peak_ranges.png",
-):
-    peaks, _ = find_peaks(spec, prominence=prominence)
-    peak_ranges = [
-        (max(p - peak_half_width, 0), min(p + peak_half_width, spec.shape[-1]))
-        for p in peaks
-    ]
-    if not generate_plot:
-        return peak_ranges
-    fig, axs = plt.subplots(2, figsize=(12, 6))
-    for i in range(2):
-        axs[i].plot(spec, color="gray")
-        axs[i].plot(peaks, spec[peaks], "x")
-        for r in peak_ranges:
-            axs[i].axvspan(r[0], r[1], facecolor="silver", alpha=0.3)
-    axs[1].set_yscale("log")
-    if save:
-        plt.savefig(filename)
-    elif show:
-        plt.show()
-    plt.close()
-    return fig, peak_ranges
-
-
 def plot_specs(spectra, labels=None, filename="fitting_res.png", save=False, show=False):
     labels = labels if labels is not None else list(range(len(spectra)))
     fig, axs = plt.subplots(2, figsize=(12, 6))

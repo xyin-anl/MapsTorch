@@ -11,7 +11,6 @@ from mapstorch.plot import (
     plot_elem_peak_ranges,
     plot_elem_spec_contribs,
     plot_elem_peak_pos,
-    plot_spec_peaks,
     plot_specs,
 )
 
@@ -33,7 +32,6 @@ from mapstorch.util import estimate_and_update_params
 PLOT_NAME_ALIASES = {
     "amp_rank": "amp_rank",
     "specs": "specs",
-    "spec_peaks": "spec_peaks",
     "elem_peak_ranges": "elem_peak_ranges",
     "elem_spec_contribs": "elem_spec_contribs",
     "elem_peak_pos": "elem_peak_pos",
@@ -177,18 +175,6 @@ def main(args):
 
             def plot_path(default_name: str) -> str:
                 return str(plot_output_dir / default_name)
-
-            if "spec_peaks" in plot_selections and int_spec.size:
-                prominence = max(float(np.max(int_spec)) / 200.0, 1.0)
-                plot_spec_peaks(
-                    int_spec,
-                    peak_half_width=5,
-                    prominence=prominence,
-                    generate_plot=True,
-                    save=True,
-                    show=False,
-                    filename=plot_path("identified_peaks.png"),
-                )
 
             if "amp_rank" in plot_selections:
                 plot_elem_amp_rank(
