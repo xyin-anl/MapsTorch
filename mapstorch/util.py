@@ -47,7 +47,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import math
 import numpy as np
-import torch
 import anywidget
 import traitlets
 from mapstorch.constant import M_PI, ENERGY_RES_OFFSET, ENERGY_RES_SQRT
@@ -249,38 +248,6 @@ def estimate_and_update_params(
     updates = {"COHERENT_SCT_ENERGY": coherent_sct_energy, "ENERGY_SLOPE": energy_slope, "COMPTON_ANGLE": compton_angle}
 
     return updates
-
-
-def estimate_gpu_tile_size(spec_vol_shape):
-    """
-    Estimate a safe tile size based on available memory and input shape.
-
-    :param spec_vol_shape: Shape of the input spec_vol (height, width, depth)
-    :param device: 'cuda' or 'cpu'
-    :return: Estimated safe tile size
-    """
-    h, w, d = spec_vol_shape
-
-    # Get available GPU memory
-    gpu_mem = torch.cuda.get_device_properties(0).total_memory
-    available_mem = gpu_mem * 0.8  # Use 80% of available memory to be safe
-    mem_per_pixel = d * 2048
-
-    # Calculate maximum number of pixels that can fit in memory
-    max_pixels = available_mem / mem_per_pixel
-
-    # Calculate tile size (assuming square tiles)
-    tile_size = int(math.sqrt(max_pixels))
-
-    # Ensure tile size is not larger than the input dimensions
-    tile_size = min(tile_size, h, w)
-
-    # Round down to nearest multiple of 32 for GPU efficiency
-    tile_size = (tile_size // 32) * 32
-    res = max(32, tile_size)  # Ensure minimum tile size of 32
-    print(f"Estimated tile size: {res}")
-
-    return res
 
 
 class PeriodicTableWidget(anywidget.AnyWidget):
