@@ -51,7 +51,11 @@ import torch
 import anywidget
 import traitlets
 from mapstorch.constant import M_PI, ENERGY_RES_OFFSET, ENERGY_RES_SQRT
-from mapstorch.default import default_fitting_elems, default_energy_consts
+from mapstorch.default import (
+    default_fitting_elems,
+    default_energy_consts,
+    default_param_vals,
+)
 
 
 def get_channel_from_energy(energy, ev):
@@ -107,6 +111,175 @@ def get_peak_ranges(
         except Exception as e:
             print("Failed to get range for", p, "with center", c)
     return ranges
+
+
+def _smooth_moving_average(values, window: int = 7):
+    """Return a lightly smoothed copy of the provided spectrum."""
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0 or window <= 1:
+        return arr
+    window = int(max(1, window))
+    if window % 2 == 0:
+        window += 1
+    pad = window // 2
+    if arr.size == 1:
+        return arr
+    padded = np.pad(arr, (pad, pad), mode="edge")
+    kernel = np.ones(window, dtype=float) / window
+    smoothed = np.convolve(padded, kernel, mode="valid")
+    return smoothed[: arr.size]
+
+
+def _find_top_peaks(
+    values,
+    start_index: int = 0,
+    min_distance: int = 25,
+    top_k: int = 10,
+    min_height: float = 0.0,
+):
+    """Identify up to top_k peaks using simple non-maximum suppression."""
+    arr = np.asarray(values, dtype=float)
+    n = arr.size
+    if n < 3:
+        return []
+    start = max(1, min(start_index, n - 2))
+    candidates = []
+    for idx in range(start, n - 1):
+        if arr[idx] < min_height:
+            continue
+        if arr[idx] >= arr[idx - 1] and arr[idx] >= arr[idx + 1]:
+            candidates.append(idx)
+    if not candidates:
+        return []
+    candidates.sort(key=lambda i: arr[i], reverse=True)
+    selected = []
+    for idx in candidates:
+        if all(abs(idx - chosen) >= min_distance for chosen in selected):
+            selected.append(idx)
+        if len(selected) >= top_k:
+            break
+    return sorted(selected)
+
+
+def _estimate_scatter_peak_indices(values, min_distance: int = 25):
+    """Return heuristic Compton and elastic peak indices (relative to values)."""
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return None, None
+    smoothed = _smooth_moving_average(arr, window=7)
+    start_idx = int(0.3 * smoothed.size)
+    start_idx = min(max(0, start_idx), max(smoothed.size - 1, 0))
+    tail = smoothed[start_idx:] if start_idx < smoothed.size else smoothed
+    if tail.size:
+        threshold = float(np.percentile(tail, 90))
+    else:
+        threshold = float(np.max(smoothed)) if smoothed.size else 0.0
+    peaks = _find_top_peaks(
+        smoothed,
+        start_index=start_idx,
+        min_distance=min_distance,
+        top_k=10,
+        min_height=threshold,
+    )
+    if not peaks:
+        return None, None
+    elastic_idx = max(peaks)
+    compton_idx = None
+    left_peaks = [idx for idx in peaks if idx < elastic_idx]
+    if left_peaks:
+        compton_idx = max(left_peaks, key=lambda idx: smoothed[idx])
+    return compton_idx, elastic_idx
+
+
+def _select_param_key(candidate_names, available_names):
+    for name in candidate_names:
+        if name in available_names:
+            return name
+    return None
+
+
+def _get_param_value_safe(params, key, default=0.0):
+    if key is None:
+        return default
+    value = params.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def estimate_and_update_params(
+    int_spec,
+    energy_range,
+    coherent_sct_energy,
+    param_reference=None,
+):
+    """Return dict of calibration parameter updates inferred from scatter peaks."""
+    if param_reference is None:
+        param_reference = default_param_vals
+    if coherent_sct_energy is None or coherent_sct_energy <= 0:
+        return {}
+    arr = np.asarray(int_spec, dtype=float)
+    if arr.size == 0:
+        return {}
+    start = max(0, min(int(energy_range[0]), arr.size - 1))
+    stop = min(arr.size, max(start + 1, int(energy_range[1]) + 1))
+    roi = arr[start:stop]
+    if roi.size < 3:
+        return {}
+    compton_rel, elastic_rel = _estimate_scatter_peak_indices(roi)
+    if elastic_rel is None:
+        return {}
+    elastic_idx = start + elastic_rel
+    compton_idx = start + compton_rel if compton_rel is not None else None
+
+    available = set(param_reference.keys())
+    slope_key = _select_param_key(
+        ["ENERGY_SLOPE", "CAL_SLOPE_[E_LINEAR]"], available
+    )
+    offset_key = _select_param_key(
+        ["ENERGY_OFFSET", "CAL_OFFSET_[E_OFFSET]"], available
+    )
+    quad_key = _select_param_key(
+        ["ENERGY_QUADRATIC", "CAL_QUAD_[E_QUADRATIC]"], available
+    )
+    angle_key = _select_param_key(
+        ["COMPTON_ANGLE", "SCATTER_ANGLE"], available
+    )
+
+    offset_val = _get_param_value_safe(param_reference, offset_key, 0.0)
+    quad_val = _get_param_value_safe(param_reference, quad_key, 0.0)
+
+    updates = {}
+    denom = float(elastic_idx)
+    slope_est = None
+    if slope_key and denom > 0:
+        slope_est = (
+            float(coherent_sct_energy) - offset_val - quad_val * (denom ** 2)
+        ) / denom
+        if np.isfinite(slope_est) and 0 < slope_est <= 0.1:
+            updates[slope_key] = float(slope_est)
+        else:
+            slope_est = None
+    if (
+        angle_key
+        and slope_est is not None
+        and compton_idx is not None
+        and compton_idx > 0
+    ):
+        comp_energy = offset_val + slope_est * compton_idx + quad_val * (
+            compton_idx ** 2
+        )
+        if comp_energy > 0:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                cos_term = 1 - 511 * (
+                    1 / comp_energy - 1 / float(coherent_sct_energy)
+                )
+            if np.isfinite(cos_term) and -1.0 <= cos_term <= 1.0:
+                theta_deg = float(np.degrees(np.arccos(cos_term)))
+                if np.isfinite(theta_deg):
+                    updates[angle_key] = theta_deg
+    return updates
 
 
 def estimate_gpu_tile_size(spec_vol_shape):

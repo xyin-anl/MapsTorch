@@ -1,12 +1,10 @@
 import sys
-from math import acos, pi
 from copy import copy
 import argparse
 import warnings
 from pathlib import Path
 
 import numpy as np
-from scipy.signal import find_peaks
 
 from mapstorch.plot import (
     plot_elem_amp_rank,
@@ -30,6 +28,7 @@ from mapstorch.default import (
 )
 from mapstorch.constant import read_constants
 from mapstorch.opt import fit_spec
+from mapstorch.util import estimate_and_update_params
 
 PLOT_NAME_ALIASES = {
     "amp_rank": "amp_rank",
@@ -60,8 +59,9 @@ def main(args):
     device_selection = args.device_selection
     verbose = args.verbose
     save_params = args.save_params
-    output_path = args.output_path
+    params_output_path = args.params_output_path
     plots_enabled = not args.disable_plots
+    heuristics_enabled = not args.disable_heuristics
     plot_output_dir = Path(args.plot_output_dir)
     if plots_enabled:
         plot_output_dir.mkdir(parents=True, exist_ok=True)
@@ -82,34 +82,17 @@ def main(args):
     elems = dataset_dict["elems"]
     int_spec = int_spec_og[energy_range[0] : energy_range[1] + 1]
 
-    # Find peaks in the spectrum
-    peaks, _ = find_peaks(int_spec, prominence=int_spec.max() / 200)
-    compton_peak_value = (
-        (int_spec_og.shape[-1] - 1) // 2 if len(peaks) < 8 else peaks[-2]
-    )
-    elastic_peak_value = (
-        (int_spec_og.shape[-1] - 1) // 1.9 if len(peaks) < 8 else peaks[-1]
-    )
-
-    # Calculate energy slope and Compton angle
-    energy_slope = coherent_sct_energy / elastic_peak_value
-    compton_energy = energy_slope * compton_peak_value
-    try:
-        compton_angle = (
-            acos(1 - 511 * (1 / compton_energy - 1 / coherent_sct_energy)) * 180 / pi
-        )
-    except:
-        compton_angle = default_param_vals["COMPTON_ANGLE"]
-
     # Update default parameter values
     param_default_vals = copy(default_param_vals)
-    param_default_vals.update(
-        {
-            "COHERENT_SCT_ENERGY": coherent_sct_energy,
-            "ENERGY_SLOPE": energy_slope,
-            "COMPTON_ANGLE": compton_angle,
-        }
+    param_default_vals["COHERENT_SCT_ENERGY"] = float(coherent_sct_energy)
+    heuristic_updates = (
+        estimate_and_update_params(
+            int_spec_og, energy_range, coherent_sct_energy, param_default_vals
+        )
+        if heuristics_enabled
+        else {}
     )
+    param_default_vals.update(heuristic_updates)
 
     # Determine fitting configuration
     elements_to_fit = elems
@@ -165,7 +148,7 @@ def main(args):
         elements_to_save = [k for k in amps.keys()]
 
         # Save to file
-        output_file = output_path or "maps_fit_parameters_override.txt"
+        output_file = params_output_path or "maps_fit_parameters_override_mapstorch.txt"
         write_override_params_file(
             output_file, param_values=param_values, elements=elements_to_save
         )
@@ -318,9 +301,9 @@ if __name__ == "__main__":
         help="Save fitted parameters to an override file",
     )
     parser.add_argument(
-        "--output_path",
+        "--params_output_path",
         type=str,
-        default="maps_fit_parameters_override.txt",
+        default="maps_fit_parameters_override_mapstorch.txt",
         help="Path to save the override parameters file",
     )
     parser.add_argument(
@@ -336,10 +319,16 @@ if __name__ == "__main__":
         help="Skip plot generation entirely",
     )
     parser.add_argument(
+        "--disable_heuristics",
+        action="store_true",
+        default=False,
+        help="Skip advanced scatter-peak heuristics",
+    )
+    parser.add_argument(
         "--plots",
         nargs="+",
         choices=AVAILABLE_PLOT_CHOICES,
-        default=["all"],
+        default=["specs", "amp_rank", "elem_peak_pos"],
         help=(
             "Select which plots to generate when --disable_plots is set. "
             "Use 'all' (default) to display every available plot."
