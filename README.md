@@ -11,28 +11,17 @@ MapsTorch is a differentiable modeling package for automating X-ray fluorescence
 
 Key features:
 
-- Automated parameter optimization for XRF spectrum fitting
-- Automatic element detection and decision support
-- GPU acceleration support for spectrum volume fitting
+- Parameter optimization for XRF spectrum fitting
+- Element selection decision support
 - Integration with existing [XRF-Maps](https://github.com/xyin-anl/XRF-Maps) workflows
 
 See [extended abstract](https://academic.oup.com/mam/article/30/Supplement_1/ozae044.1017/7720325) from M&M 2024.
 
 ## Get Started
 
-Latest development version:
-
 ```
 pip install git+https://github.com/xyin-anl/MapsTorch.git
 ```
-
-Latest release version:
-
-```
-pip install mapstorch
-```
-
-_Optional:_ For GPU acceleration of spectra volume fitting, install PyTorch with CUDA support following https://pytorch.org/get-started/locally/
 
 **Develop with Pixi**
 
