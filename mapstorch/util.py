@@ -112,7 +112,7 @@ def get_peak_ranges(
     return ranges
 
 
-def _smooth_moving_average(values, window: int = 7):
+def _smooth_moving_average(values, window):
     """Return a lightly smoothed copy of the provided spectrum."""
     arr = np.asarray(values, dtype=float)
     if arr.size == 0 or window <= 1:
@@ -131,10 +131,10 @@ def _smooth_moving_average(values, window: int = 7):
 
 def _find_top_peaks(
     values,
-    start_index: int = 0,
-    min_distance: int = 25,
-    top_k: int = 10,
-    min_height: float = 0.0,
+    start_index,
+    min_distance,
+    top_k,
+    min_height,
 ):
     """Identify up to top_k peaks using simple non-maximum suppression."""
     arr = np.asarray(values, dtype=float)
@@ -160,24 +160,24 @@ def _find_top_peaks(
     return sorted(selected)
 
 
-def _estimate_scatter_peak_indices(values, min_distance: int = 25):
+def _estimate_scatter_peak_indices(values, window: int=3, min_distance: int=10, top_k: int=20, threshold_percentile: int=60, start_index_frac: float=0.4):
     """Return heuristic Compton and elastic peak indices (relative to values)."""
     arr = np.asarray(values, dtype=float)
     if arr.size == 0:
         return None, None
-    smoothed = _smooth_moving_average(arr, window=7)
-    start_idx = int(0.3 * smoothed.size)
+    smoothed = _smooth_moving_average(arr, window=window)
+    start_idx = int(start_index_frac * smoothed.size)
     start_idx = min(max(0, start_idx), max(smoothed.size - 1, 0))
     tail = smoothed[start_idx:] if start_idx < smoothed.size else smoothed
     if tail.size:
-        threshold = float(np.percentile(tail, 90))
+        threshold = float(np.percentile(tail, threshold_percentile))
     else:
         threshold = float(np.max(smoothed)) if smoothed.size else 0.0
     peaks = _find_top_peaks(
         smoothed,
         start_index=start_idx,
         min_distance=min_distance,
-        top_k=10,
+        top_k=top_k,
         min_height=threshold,
     )
     if not peaks:
@@ -188,23 +188,6 @@ def _estimate_scatter_peak_indices(values, min_distance: int = 25):
     if left_peaks:
         compton_idx = max(left_peaks, key=lambda idx: smoothed[idx])
     return compton_idx, elastic_idx
-
-
-def _select_param_key(candidate_names, available_names):
-    for name in candidate_names:
-        if name in available_names:
-            return name
-    return None
-
-
-def _get_param_value_safe(params, key, default=0.0):
-    if key is None:
-        return default
-    value = params.get(key, default)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def estimate_and_update_params(
