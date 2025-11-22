@@ -115,17 +115,19 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
     return counts
 
 
-def escape_peak(spectra, ev, escape_factor, device):
-    Si_K_edge = 1.73998
+def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
+    if detector_type == "Si":
+        detector_K_edge = 1.73998
+    elif detector_type == "Ge":
+        detector_K_edge = 2.66544
+    else:
+        raise ValueError(f"Detector type {detector_type} not supported")
     bins = int(
-        Si_K_edge / (ev[1] - ev[0])
-    )  # todo: ev[1] - ev[0] can be zero and cause error...
+        detector_K_edge / (ev[1] - ev[0])
+    )
     escape_spec = torch.zeros_like(spectra, device=device)
-    # for i in range(len(ev) - bins):
-    #     escape_spec[i] = spectra[i + bins] * escape_factor
     escape_spec[: len(ev) - bins] = spectra[bins : len(ev)] * escape_factor
     return escape_spec
-
 
 def model_elem_spec(
     params,
@@ -230,11 +232,11 @@ def model_spec(
     params,
     energy_range,
     elements_to_fit=default_fitting_elems,
-    use_step=True,
-    use_tail=False,
     device="cpu",
     e_consts=default_energy_consts,
     elem_info=default_elem_info,
+    detector_type="Si", # "Si" or "Ge"
+    escape_factor=0.0,
 ):
     agr_spec = torch.zeros(energy_range[1] - energy_range[0] + 1, device=device)
     energy = torch.linspace(
@@ -258,8 +260,8 @@ def model_spec(
                     params,
                     e,
                     ev,
-                    use_step,
-                    use_tail,
+                    True,
+                    False,
                     device=device,
                     e_consts=e_consts,
                     elem_info=elem_info,
@@ -268,12 +270,12 @@ def model_spec(
             except Exception:
                 print("Failed to model spectrum for", e)
     elastic_spec = elastic_peak(params, ev, params["ENERGY_SLOPE"])
-    compton_spec = compton_peak(params, ev, params["ENERGY_SLOPE"], use_step, use_tail)
+    compton_spec = compton_peak(params, ev, params["ENERGY_SLOPE"], True, False)
     agr_spec.add_(elastic_spec)
     agr_spec.add_(compton_spec)
     if params["ENERGY_OFFSET"] > 0:
         with torch.no_grad():
-            escape_spec = escape_peak(agr_spec, ev, params["SI_ESCAPE"], device)
+            escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type)
             agr_spec.add_(escape_spec)
     return agr_spec
 

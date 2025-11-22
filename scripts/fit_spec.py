@@ -47,13 +47,13 @@ AVAILABLE_PLOT_CHOICES = tuple(
 def main(args):
     # Configuration parameters
     dataset = args.dataset
+    detector_material = args.detector_material
     int_spec_path = args.int_spec_path
     elem_path = args.elem_path
     coherent_sct_energy = args.incident_energy
     energy_range = args.energy_range
     init_amp = args.init_amp
     use_snip = args.use_snip
-    use_step = args.use_step
     n_iter = args.n_iter
     loss_selection = args.loss_selection
     device_selection = args.device_selection
@@ -63,6 +63,7 @@ def main(args):
     plots_enabled = not args.disable_plots
     heuristics_enabled = not args.disable_heuristics
     plot_output_dir = Path(args.plot_output_dir)
+    escape_factor = args.escape_factor
     if plots_enabled:
         plot_output_dir.mkdir(parents=True, exist_ok=True)
     raw_plot_choices = args.plots or []
@@ -105,7 +106,19 @@ def main(args):
         elements_with_pileup = override_params.get("elements_with_pileup", [])
         override_elements = override_params.get("elements_to_fit", [])
         elements_to_fit = override_elements + elements_with_pileup or elems
+        detector_material = override_params.get("detector_material", "Si")
+        escape_factor = override_params.get("escape_factor", 0.0)
         init_param_vals = override_params
+        if verbose:
+            print(f"Override parameters loaded from {args.override_params_file}")
+            print(f"Detector material: {detector_material}")
+            print(f"Escape factor: {escape_factor}")
+            print(f"Elements to fit: {elements_to_fit}")
+            print(f"Elements with pileup: {elements_with_pileup}")
+    else:
+        if verbose:
+            print(f"Detector material: {detector_material}")
+            print(f"Escape factor: {escape_factor}")
 
     # Fit the spectrum using specified parameters
     fitted_tensors, fitted_spec, fitted_bkg, _ = fit_spec(
@@ -119,8 +132,6 @@ def main(args):
         tune_params=True,
         init_amp=init_amp,
         use_snip=use_snip,
-        use_step=use_step,
-        use_tail=False,
         loss=loss_selection,
         optimizer="adamw",
         n_iter=n_iter,
@@ -129,6 +140,8 @@ def main(args):
         use_finite_diff=False,
         verbose=verbose,
         e_consts=e_consts,
+        detector_type=detector_material,
+        escape_factor=escape_factor,
     )
 
     # Extract and sort amplitudes of fitted elements
@@ -251,6 +264,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("dataset", type=str, help="Path to the dataset HDF5 file")
     parser.add_argument("-e", "--incident_energy", type=float, required=True, help="Incident energy")
+    parser.add_argument("--detector_material", type=str, default="Si", help="Detector material")
+    parser.add_argument("--escape_factor", type=float, default=0.0, help="Escape factor")
     parser.add_argument(
         "-n", "--n_iter", type=int, default=500, help="Number of iterations for fitting"
     )
@@ -281,9 +296,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_snip", type=bool, default=True, help="Flag to use the SNIP algorithm"
-    )
-    parser.add_argument(
-        "--use_step", type=bool, default=True, help="Flag to use the step function"
     )
     parser.add_argument(
         "--loss_selection", type=str, default="mse", help="Loss function selection"

@@ -163,8 +163,6 @@ def fit_spec(
     tune_params=True,
     init_amp=True,
     use_snip=True,
-    use_step=True,
-    use_tail=False,
     loss="mse",
     optimizer="adam",
     n_iter=500,
@@ -177,6 +175,8 @@ def fit_spec(
     finite_diff_epsilon=1e-8,
     e_consts=default_energy_consts,
     elem_info=default_elem_info,
+    detector_type="Si", # "Si" or "Ge"
+    escape_factor=0.0,
 ):
     assert loss in ["mse", "l1"], "Loss function not supported"
     assert optimizer in ["adam", "adamw"], "Optimizer not supported"
@@ -247,13 +247,13 @@ def fit_spec(
                     energy_range,
                     elements,
                     use_snip,
-                    use_step,
-                    use_tail,
                     indices,
                     loss_fn,
                     l1_lambda,
                     e_consts,
                     elem_info,
+                    detector_type,
+                    escape_factor,
                 )
                 for param_name, param in tensors.items():
                     if param.requires_grad:
@@ -267,13 +267,13 @@ def fit_spec(
                                 energy_range,
                                 elements,
                                 use_snip,
-                                use_step,
-                                use_tail,
                                 indices,
                                 loss_fn,
                                 l1_lambda,
                                 e_consts,
                                 elem_info,
+                                detector_type,
+                                escape_factor,
                             )
                             param_grad.flatten()[i] = (
                                 perturbed_loss - loss_val
@@ -287,13 +287,13 @@ def fit_spec(
                 energy_range,
                 elements,
                 use_snip,
-                use_step,
-                use_tail,
                 indices,
                 loss_fn,
                 l1_lambda,
                 e_consts,
                 elem_info,
+                detector_type,
+                escape_factor,
             )
             loss_val.backward()
         return loss_val
@@ -323,13 +323,13 @@ def _calculate_loss(
     energy_range,
     elements,
     use_snip,
-    use_step,
-    use_tail,
     indices,
     loss_fn,
     l1_lambda,
     e_consts,
     elem_info,
+    detector_type,
+    escape_factor,
 ):
     bkg = (
         snip_bkg(
@@ -348,11 +348,11 @@ def _calculate_loss(
         tensors,
         energy_range,
         elements_to_fit=elements,
-        use_step=use_step,
-        use_tail=use_tail,
         device=int_spec_tensor.device,
         e_consts=e_consts,
         elem_info=elem_info,
+        detector_type=detector_type,
+        escape_factor=escape_factor,
     )
 
     # Calculate main loss

@@ -190,7 +190,7 @@ def create_dataset(
 
 
 def write_override_params_file(
-    output_path, param_values=None, elements=None, detector_elements=1
+    output_path, param_values=None, elements=None, detector_material="Si", escape_factor=0.0
 ):
     """Write a maps_fit_parameters_override.txt file with specified parameters and elements.
 
@@ -198,11 +198,19 @@ def write_override_params_file(
         output_path: Path where to save the override file
         param_values: Dictionary of parameter values to override defaults
         elements: List of element names to fit
-        detector_elements: Number of detector elements (default: 1)
+        detector_material: Detector material (default: "Si")
 
     The function will use default values from mapstorch.default for any parameters
     not specified in param_values.
     """
+    if detector_material not in ["Si", "Ge"]:
+        raise ValueError(f"Detector material {detector_material} not supported")
+    detector_material_id = 0 if detector_material == "Ge" else 1
+    si_escape_enable = 1 if detector_material == "Si" else 0
+    si_escape_factor = escape_factor if detector_material == "Si" else 0.0
+    ge_escape_enable = 1 if detector_material == "Ge" else 0
+    ge_escape_factor = escape_factor if detector_material == "Ge" else 0.0
+    
     # Validate and prepare elements list
     if elements is not None:
         invalid_elements = []
@@ -235,7 +243,7 @@ def write_override_params_file(
             "   put below the number of detectors that were used to acquire spectra. IMPORTANT:\n"
         )
         f.write("   this MUST come after VERSION, and before all other options!\n")
-        f.write(f"DETECTOR_ELEMENTS: {detector_elements}\n")
+        f.write("DETECTOR_ELEMENTS:       1\n")
         f.write("   give this file an internal name, whatever you like\n")
         f.write("IDENTIFYING_NAME_[WHATEVERE_YOU_LIKE]: automatic\n")
 
@@ -328,7 +336,7 @@ def write_override_params_file(
 
         # Detector parameters
         f.write("    detector material: 0= Germanium, 1 = Si\n")
-        f.write("DETECTOR_MATERIAL: 1\n")
+        f.write(f"DETECTOR_MATERIAL: {detector_material_id}\n")
         f.write("    beryllium window thickness, in micrometers, typically 8 or 24\n")
         f.write("BE_WINDOW_THICKNESS: 0.0\n")
         f.write("thickness of the detector chip, e.g., 350 microns for an SDD\n")
@@ -387,14 +395,14 @@ BRANCHING_RATIO_ADJUSTMENT_K: Zn, 1., 1., 1.0, 1.
     the parameter adds the escape peaks (offset) to the fit if larger than 0. You should not enable Si and Ge at the same time, ie, one of these two values should be zero
 """
         f.write(branching_ratio_section)
-        f.write(f"SI_ESCAPE_FACTOR: {params.get('SI_ESCAPE', 0.0)}\n")
-        final_section = """GE_ESCAPE_FACTOR: 0.0
-    this parameter adds a component to the escape peak that depends linear on energy
-LINEAR_ESCAPE_FACTOR: 0.0
-    the parameter enables fitting of the escape peak strengths. set 1 to enable, set to 0 to disable. (in matrix fitting always disabled)
-SI_ESCAPE_ENABLE: 0
-GE_ESCAPE_ENABLE: 0
-    the lines (if any) below will override the detector names built in to maps. please modify only if you are sure you understand the effect
+        f.write(f"SI_ESCAPE_FACTOR: {si_escape_factor}\n")
+        f.write(f"GE_ESCAPE_FACTOR: {ge_escape_factor}\n")
+        f.write("    this parameter adds a component to the escape peak that depends linear on energy\n")
+        f.write("LINEAR_ESCAPE_FACTOR: 0.0\n")
+        f.write("    the parameter enables fitting of the escape peak strengths. set 1 to enable, set to 0 to disable. (in matrix fitting always disabled)\n")
+        f.write(f"SI_ESCAPE_ENABLE: {si_escape_enable}\n")
+        f.write(f"GE_ESCAPE_ENABLE: {ge_escape_enable}\n")
+        final_section = """    the lines (if any) below will override the detector names built in to maps. please modify only if you are sure you understand the effect
 SRCURRENT: S:SRcurrentAI
 US_IC: 2xfm:scaler3_cts1.B
 DS_IC: 2xfm:scaler3_cts1.C
@@ -466,7 +474,11 @@ def parse_override_params_file(file_path):
     # Additional data that might be extracted
     elements_to_fit = []
     elements_with_pileup = []
-    detector_elements = 1
+    detector_material = "Si"
+    si_escape_enable = 0
+    ge_escape_enable = 0
+    si_escape_factor = 0.0
+    ge_escape_factor = 0.0
 
     try:
         with open(file_path, "r") as f:
@@ -486,8 +498,8 @@ def parse_override_params_file(file_path):
                     value = parts[1].strip()
 
                     # Handle specific parameters
-                    if param == "DETECTOR_ELEMENTS":
-                        detector_elements = int(value)
+                    if param == "DETECTOR_MATERIAL":
+                        detector_material = "Ge" if int(value) == 0 else "Si"
                     elif param == "ELEMENTS_TO_FIT":
                         elements_to_fit = [
                             e.strip() for e in value.split(",") if e.strip()
@@ -496,6 +508,15 @@ def parse_override_params_file(file_path):
                         elements_with_pileup = [
                             e.strip() for e in value.split(",") if e.strip()
                         ]
+                    elif param == "SI_ESCAPE_FACTOR":
+                        si_escape_factor = float(value)
+                    elif param == "GE_ESCAPE_FACTOR":
+                        ge_escape_factor = float(value)
+                    elif param == "SI_ESCAPE_ENABLE":
+                        si_escape_enable = int(value)
+                    elif param == "GE_ESCAPE_ENABLE":
+                        ge_escape_enable = int(value)
+
                     # Extract numerical parameters
                     elif param in param_keys:
                         internal_param = param_keys[param]
@@ -513,6 +534,14 @@ def parse_override_params_file(file_path):
     # Add additional extracted data to the returned dictionary
     params["elements_to_fit"] = elements_to_fit
     params["elements_with_pileup"] = elements_with_pileup
-    params["detector_elements"] = detector_elements
+    params["detector_material"] = detector_material
+
+    if si_escape_enable == 1 and detector_material == "Si":
+        escape_factor = si_escape_factor
+    elif ge_escape_enable == 1 and detector_material == "Ge":
+        escape_factor = ge_escape_factor
+    else:
+        escape_factor = 0.0
+    params["escape_factor"] = escape_factor
 
     return params

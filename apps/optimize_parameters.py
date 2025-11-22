@@ -274,7 +274,6 @@ def _(
     param_checkboxes,
     run_button,
     use_snip_checkbox,
-    use_step_checkbox,
 ):
     mo.stop(not run_button.value)
     from mapstorch.opt import fit_spec
@@ -298,8 +297,6 @@ def _(
             tune_params=True,
             init_amp=init_amp_checkbox.value,
             use_snip=use_snip_checkbox.value,
-            use_step=use_step_checkbox.value,
-            use_tail=False,
             loss=loss_selection.value,
             optimizer=optimizer_selection.value,
             n_iter=n_iter,
@@ -701,9 +698,8 @@ def _(default_fitting_params, load_params_button, mo, param_checkbox_vals):
 def _(device_list, mo):
     init_amp_checkbox = mo.ui.checkbox(label="Initialize amplitudes", value=True)
     use_snip_checkbox = mo.ui.checkbox(label="Use SNIP background", value=True)
-    use_step_checkbox = mo.ui.checkbox(label="Modify peaks with step", value=True)
     model_options = mo.hstack(
-        [init_amp_checkbox, use_snip_checkbox, use_step_checkbox],
+        [init_amp_checkbox, use_snip_checkbox],
         justify="start",
         gap=5,
     )
@@ -731,7 +727,6 @@ def _(device_list, mo):
         opt_options,
         optimizer_selection,
         use_snip_checkbox,
-        use_step_checkbox,
     )
 
 
