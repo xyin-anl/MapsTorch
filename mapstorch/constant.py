@@ -117,7 +117,6 @@ lele = [
     "Sb_L",
     "Te_L",
     "I_L",
-    "Xe_L,",
     "Cs_L",
     "Ba_L",
     "La_L",
@@ -784,7 +783,7 @@ class Henke:
             f1_all = f1
             f2_all = f2
 
-        return energies, f1, f2, energies_extra, f1_extra, f2_extra
+        return energies_all, f1_all, f2_all, energies_extra, f1_extra, f2_extra
 
     def read(self, ielement=-1, all=True):
         if ielement == -1:
@@ -1508,6 +1507,17 @@ def calculate_mu_fractions(pars, info_elements, calc_range):
 
         z = wo[0][0] + 1
 
+        detector_mass = None
+        for e in range(len(info_elements)):
+            if info_elements[e].name == name:
+                detector_mass = info_elements[e].mass
+                break
+
+        if detector_mass is None:
+            raise ValueError(f"Could not find detector element {name} in element info")
+
+        molecules_per_cc = density * AVOGADRO / detector_mass
+
         energies_all, _, f2_all, _, _, _ = henkedata.extra(ielement=z - 1)
 
         iter_range = (
@@ -1525,15 +1535,6 @@ def calculate_mu_fractions(pars, info_elements, calc_range):
                 if energy == 0.0:
                     continue
                 wavelength_angstroms = HC_ANGSTROMS / energy
-                element_mass = 0.0
-                elname = pars[i, 0].name.split("_")[0]
-                for e in range(len(info_elements)):
-                    if info_elements[e].name == elname:
-                        element_mass = info_elements[e].mass
-                if element_mass == 0.0:
-                    pass
-                else:
-                    molecules_per_cc = density * AVOGADRO / element_mass
                 constant = (
                     RE
                     * (1.0e-16 * wavelength_angstroms * wavelength_angstroms)
@@ -1897,7 +1898,7 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
                 wo = np.where(s_name == temp_string[0])
 
                 if (wo[0].size > 0) and (len(temp_string) == 4):
-                    ii = wo[0][0] - np.amin(kele_pos) + 1
+                    ii = wo[0][0] - 1
                     factor_l1 = float(temp_string[1])
                     factor_l2 = float(temp_string[2])
                     factor_l3 = float(temp_string[3])
@@ -1973,7 +1974,7 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
                 wo = np.where(s_name == temp_string[0])
 
                 if wo[0].size > 0 and len(temp_string) == 13:
-                    ii = wo[0][0] - np.amin(kele_pos) + 1
+                    ii = wo[0][0] - 1
                     name = temp_string[0].strip()
                     el_names = [x.name for x in info_elements]
 
@@ -1987,7 +1988,7 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
                 wo = np.where(s_name == temp_string[0])
 
                 if (wo[0].size > 0) and (len(temp_string) == 5):
-                    ii = wo[0][0] - np.amin(kele_pos) + 1
+                    ii = wo[0][0] - 1
                     name = temp_string[0].strip()
                     el_names = [x.name for x in info_elements]
                     if name[:-2] in el_names:
@@ -2017,14 +2018,14 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
             elif tag == "TAIL_FRACTION_ADJUST_SI":
                 temp = float(value)
                 wo = np.where(s_name == "Si")
-                ii = wo[0][0] - np.amin(kele_pos) + 1
-                e_pars[ii, :].mu_fraction = value * e_pars[ii, :].mu_fraction
+                ii = wo[0][0] - 1
+                e_pars[ii, :].mu_fraction = temp * e_pars[ii, :].mu_fraction
 
             elif tag == "TAIL_WIDTH_ADJUST_SI":
                 temp = float(value)
                 wo = np.where(s_name == "Si")
-                ii = wo[0][0] - np.amin(kele_pos) + 1
-                e_pars[ii, 0:3].width_multi = value
+                ii = wo[0][0] - 1
+                e_pars[ii, 0:3].width_multi = temp
 
     if return_dict:
         return {e_pars[i, 0].name: e_pars[i] for i in range(e_pars.shape[0])}
