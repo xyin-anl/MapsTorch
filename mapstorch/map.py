@@ -90,38 +90,49 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
         + compton_E * 2.96 * params["FWHM_FANOPRIME"]
     )
     delta_energy = ev - compton_E
-    faktor = 1.0 / (
-        1.0
-        + params["COMPTON_F_STEP"]
-        + params["COMPTON_F_TAIL"]
-        + params["COMPTON_HI_F_TAIL"]
-    )
-    faktor *= 10 ** params["COMPTON_AMPLITUDE"]
+
+    norm = 1.0
+    if use_step and params["COMPTON_F_STEP"] > 0:
+        norm += params["COMPTON_F_STEP"]
+    if use_tail:
+        if params["COMPTON_F_TAIL"] > 0:
+            norm += params["COMPTON_F_TAIL"]
+        if params["COMPTON_HI_F_TAIL"] > 0:
+            norm += params["COMPTON_HI_F_TAIL"]
+
+    faktor = 10 ** params["COMPTON_AMPLITUDE"] / norm
+
     counts = faktor * peak(gain, sigma * params["COMPTON_FWHM_CORR"], delta_energy)
-    if params["COMPTON_F_STEP"] > 0 and use_step:
+
+    if use_step and params["COMPTON_F_STEP"] > 0:
         counts.add_(
-            (faktor * params["COMPTON_F_STEP"])
-            * step(gain, sigma, delta_energy, compton_E)
+            faktor * params["COMPTON_F_STEP"] * step(gain, sigma, delta_energy, compton_E)
         )
     if use_tail:
-        counts.add_(
-            (faktor * params["COMPTON_F_TAIL"])
-            * tail(gain, sigma, delta_energy, params["COMPTON_GAMMA"])
-        )
-        counts.add_(
-            (faktor * params["COMPTON_HI_F_TAIL"])
-            * tail(gain, sigma, -delta_energy, params["COMPTON_HI_GAMMA"])
-        )
+        if params["COMPTON_F_TAIL"] > 0:
+            counts.add_(
+                faktor
+                * params["COMPTON_F_TAIL"]
+                * tail(gain, sigma, delta_energy, params["COMPTON_GAMMA"])
+            )
+        if params["COMPTON_HI_F_TAIL"] > 0:
+            counts.add_(
+                faktor
+                * params["COMPTON_HI_F_TAIL"]
+                * tail(gain, sigma, -delta_energy, params["COMPTON_HI_GAMMA"])
+            )
     return counts
 
 
 def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
     if detector_type == "Si":
-        detector_K_edge = 1.73998  # keV
+        # Approximate Si Kα1 energy (keV)
+        detector_escape_E = 1.73998
     elif detector_type == "Ge":
-        detector_K_edge = 11.103  # keV
+        # Approximate Ge Kα1 energy (keV)
+        detector_escape_E = 9.886
     else:
-        detector_K_edge = 1.73998
+        detector_escape_E = 1.73998
 
     escape_spec = torch.zeros_like(spectra, device=device)
 
@@ -132,7 +143,7 @@ def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
     if delta_e <= 0:
         return escape_spec
 
-    bins = int(round(detector_K_edge / delta_e))
+    bins = int(round(detector_escape_E / delta_e))
     if bins < len(ev):
         escape_spec[: len(ev) - bins] = spectra[bins:] * escape_factor
 

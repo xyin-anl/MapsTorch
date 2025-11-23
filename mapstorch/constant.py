@@ -1013,13 +1013,10 @@ class Henke:
         denom = energies * 4.0 * np.pi * beta
 
         zeroes = np.where(denom == 0.0)
-        nonzeroes = np.where(denom != 0.0)
         denom[zeroes] = 1e-8
 
-        inverse_mu = np.array((len(energies)))
-
         inverse_mu = 1.239852 / denom
-        if len(zeroes) > 0:
+        if zeroes[0].size > 0:
             inverse_mu[zeroes] = np.inf
 
         return (
@@ -1746,25 +1743,27 @@ def define_constants(info_elements, pileups=None, return_dict=True):
                 e_pars[ii, 2].energy = info_elements[j].xrf["mb"]
                 e_pars[ii, 3].energy = info_elements[j].xrf["mg"]
 
+                ma1_yield = info_elements[j].xrf_abs_yield["ma1"]
+                ma2_yield = info_elements[j].xrf_abs_yield["ma2"]
+                mb_yield = info_elements[j].xrf_abs_yield["mb"]
+                mg_yield = info_elements[j].xrf_abs_yield["mg"]
+
                 e_pars[ii, 0].ratio = 1.0
-                e_pars[ii, 1].ratio = (
-                    info_elements[j].xrf_abs_yield["ma2"]
-                    / info_elements[j].xrf_abs_yield["ma1"]
-                    if info_elements[j].xrf_abs_yield["ma2"] != 0.0
-                    else 1.0
-                )
-                e_pars[ii, 2].ratio = (
-                    info_elements[j].xrf_abs_yield["mb"]
-                    / info_elements[j].xrf_abs_yield["ma1"]
-                    if info_elements[j].xrf_abs_yield["mb"] != 0.0
-                    else 1.0
-                )
-                e_pars[ii, 3].ratio = (
-                    info_elements[j].xrf_abs_yield["mg"]
-                    / info_elements[j].xrf_abs_yield["ma1"]
-                    if info_elements[j].xrf_abs_yield["mg"] != 0.0
-                    else 1.0
-                )
+
+                if ma1_yield != 0.0 and ma2_yield != 0.0:
+                    e_pars[ii, 1].ratio = ma2_yield / ma1_yield
+                else:
+                    e_pars[ii, 1].ratio = 0.0
+
+                if ma1_yield != 0.0 and mb_yield != 0.0:
+                    e_pars[ii, 2].ratio = mb_yield / ma1_yield
+                else:
+                    e_pars[ii, 2].ratio = 0.0
+
+                if ma1_yield != 0.0 and mg_yield != 0.0:
+                    e_pars[ii, 3].ratio = mg_yield / ma1_yield
+                else:
+                    e_pars[ii, 3].ratio = 0.0
 
                 e_pars[ii, 0].type = 7
                 e_pars[ii, 1].type = 7
