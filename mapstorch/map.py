@@ -117,16 +117,25 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
 
 def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
     if detector_type == "Si":
-        detector_K_edge = 1.73998
+        detector_K_edge = 1.73998  # keV
     elif detector_type == "Ge":
-        detector_K_edge = 2.66544
+        detector_K_edge = 11.103  # keV
     else:
-        raise ValueError(f"Detector type {detector_type} not supported")
-    bins = int(
-        detector_K_edge / (ev[1] - ev[0])
-    )
+        detector_K_edge = 1.73998
+
     escape_spec = torch.zeros_like(spectra, device=device)
-    escape_spec[: len(ev) - bins] = spectra[bins : len(ev)] * escape_factor
+
+    if ev.numel() < 2:
+        return escape_spec
+
+    delta_e = torch.mean(ev[1:] - ev[:-1]).item()
+    if delta_e <= 0:
+        return escape_spec
+
+    bins = int(round(detector_K_edge / delta_e))
+    if bins < len(ev):
+        escape_spec[: len(ev) - bins] = spectra[bins:] * escape_factor
+
     return escape_spec
 
 def model_elem_spec(
@@ -273,7 +282,7 @@ def model_spec(
     compton_spec = compton_peak(params, ev, params["ENERGY_SLOPE"], True, False)
     agr_spec.add_(elastic_spec)
     agr_spec.add_(compton_spec)
-    if params["ENERGY_OFFSET"] > 0:
+    if escape_factor > 0.0:
         with torch.no_grad():
             escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type)
             agr_spec.add_(escape_spec)
