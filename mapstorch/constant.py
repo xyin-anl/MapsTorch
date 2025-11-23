@@ -1391,13 +1391,35 @@ class EnergyStruct:
         if self.type == 0:
             return False
         elif self.is_pileup:
-            return True
+            base_names = self.name.split("_")
+            if len(base_names) != 2:
+                return True
+
+            el1_name, el2_name = base_names
+            e1 = None
+            e2 = None
+            for info in info_elements:
+                if info.name == el1_name:
+                    e1 = info
+                elif info.name == el2_name:
+                    e2 = info
+                if e1 is not None and e2 is not None:
+                    break
+
+            if e1 is None or e2 is None:
+                return True
+
+            k1 = e1.bindingE.get("K", 0.0)
+            k2 = e2.bindingE.get("K", 0.0)
+            if k1 <= 0.0 or k2 <= 0.0:
+                return True
+
+            return (k1 < coherent_sct_energy) and (k2 < coherent_sct_energy)
         else:
             elname = self.name.split("_")[0]
             e_info = next((e for e in info_elements if e.name == elname), None)
             if e_info is None:
-                print(f"Error: Could not find element {elname}")
-                return False
+                return True
             else:
                 if self.ptype.startswith("K"):
                     return e_info.bindingE["K"] < coherent_sct_energy
