@@ -93,11 +93,7 @@ def get_peak_ranges(
     energy_quadratic,
     energy_range,
 ):
-    energy = np.linspace(
-        energy_range[0],
-        energy_range[1] + 1,
-        energy_range[1] - energy_range[0] + 1,
-    )
+    energy = np.arange(energy_range[0], energy_range[1] + 1, dtype=float)
     ev = energy_offset + energy_slope * energy + energy_quadratic * (energy**2)
     centers = get_peak_centers(elements, coherent_sct_energy, compton_angle)
     ranges = {}

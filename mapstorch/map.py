@@ -248,11 +248,11 @@ def model_spec(
     escape_factor=0.0,
 ):
     agr_spec = torch.zeros(energy_range[1] - energy_range[0] + 1, device=device)
-    energy = torch.linspace(
+    energy = torch.arange(
         energy_range[0],
         energy_range[1] + 1,
-        energy_range[1] - energy_range[0] + 1,
         device=device,
+        dtype=torch.float32,
     )
     ev = (
         params["ENERGY_OFFSET"]

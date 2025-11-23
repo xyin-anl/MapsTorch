@@ -463,11 +463,11 @@ def plot_elem_spec_contribs(
                 og_tensor = tensors[e].clone()
                 amp_val = elem_amps.get(e, og_tensor.item())
                 tensors[e] = torch.tensor(amp_val, device=tensors[e].device)
-                energy = torch.linspace(
+                energy = torch.arange(
                     energy_range[0],
                     energy_range[1] + 1,
-                    energy_range[1] - energy_range[0] + 1,
                     device=tensors[e].device,
+                    dtype=torch.float32,
                 )
                 ev = (
                     tensors["ENERGY_OFFSET"]
