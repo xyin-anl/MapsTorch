@@ -932,7 +932,7 @@ class Henke:
 
         return energies, f1, f2, n_extra, extra_energies, extra_f1, extra_f2
 
-    def array(self, compound_name, density, graze_mrad=0):
+    def array(self, compound_name, density, graze_mrad=0, verbose=False):
 
         z_array = []
         z_array, atwt = self.compound(compound_name)
@@ -955,7 +955,8 @@ class Henke:
                 ) = self.read(ielement=i)
                 if energies == None:
                     continue
-                print("this_f1.shape: %s", this_f1.shape)
+                if verbose:
+                    print("this_f1.shape:", this_f1.shape)
                 if first_time == 1:
                     f1 = z_array[i] * this_f1
                     f2 = z_array[i] * this_f2
@@ -1035,11 +1036,22 @@ class Henke:
         )
 
     def get_henke(self, compound_name, density, energy):
-        if len(compound_name) == 0:
-            print(
-                "henke, compound_name, density, energy, f1, f2, delta, beta, graze_mrad, reflect, inverse_mu=inverse_mu inverse_mu is 1/e absorption length in microns. atwt is the atom-averaged atomic weight for the compound"
-            )
-            return None, None, None, None, None, None, None, None
+        """
+        Log-log interpolation of Henke data for a single energy.
+
+        Parameters
+        ----------
+        compound_name : str
+        density : float
+        energy : float
+            Photon energy in the same units as the Henke tables (usually eV).
+
+        Returns
+        -------
+        f1, f2, delta, beta, graze_mrad, reflect, inverse_mu, atwt
+        """
+        if not compound_name:
+            raise ValueError("compound_name must be non-empty")
 
         (
             enarr,
@@ -1049,137 +1061,56 @@ class Henke:
             betaarr,
             graze_mrad,
             reflect_arr,
-            inverse_mu,
+            inverse_mu_arr,
             atwt,
             alpha,
         ) = self.array(compound_name, density)
 
+        energy = float(energy)
+
         num_energies = len(enarr)
-
         high_index = 0
-        while (energy > enarr[high_index]) and (high_index < (num_energies - 1)):
-            high_index = high_index + 1
-
+        while (energy > enarr[high_index]) and (high_index < num_energies - 1):
+            high_index += 1
         if high_index == 0:
             high_index = 1
+        if high_index >= num_energies:
+            high_index = num_energies - 1
         low_index = high_index - 1
 
         ln_lower_energy = np.log(enarr[low_index])
         ln_higher_energy = np.log(enarr[high_index])
-        fraction = (np.log(energy) - ln_lower_energy) / (
-            ln_higher_energy - ln_lower_energy
-        )
+        ln_energy = np.log(energy)
 
-        f1_lower = f1arr[low_index]
-        f1_higher = f1arr[high_index]
-        f1 = f1_lower + fraction * (f1_higher - f1_lower)
+        frac = (ln_energy - ln_lower_energy) / (ln_higher_energy - ln_lower_energy)
 
-        ln_f2_lower = np.log(np.abs(f2arr(low_index)))
-        ln_f2_higher = np.log(np.abs(f2arr(high_index)))
-        f2 = np.exp(ln_f2_lower + fraction * (ln_f2_higher - ln_f2_lower))
+        f1 = f1arr[low_index] + frac * (f1arr[high_index] - f1arr[low_index])
+        delta = deltaarr[low_index] + frac * (deltaarr[high_index] - deltaarr[low_index])
+        reflect = reflect_arr[low_index] + frac * (reflect_arr[high_index] - reflect_arr[low_index])
 
-        delta_lower = deltaarr[low_index]
-        delta_higher = deltaarr[high_index]
-        delta = delta_lower + fraction * (delta_higher - delta_lower)
+        ln_f2_low = np.log(np.abs(f2arr[low_index]))
+        ln_f2_high = np.log(np.abs(f2arr[high_index]))
+        ln_f2 = ln_f2_low + frac * (ln_f2_high - ln_f2_low)
+        f2_sign = np.sign(f2arr[high_index] if f2arr[high_index] != 0 else f2arr[low_index])
+        f2 = f2_sign * np.exp(ln_f2)
 
-        ln_beta_lower = np.log(np.abs(betaarr(low_index)))
-        ln_beta_higher = np.log(np.abs(betaarr(high_index)))
-        beta = np.exp(ln_beta_lower + fraction * (ln_beta_higher - ln_beta_lower))
-
-        reflect_lower = reflect_arr[low_index]
-        reflect_higher = reflect_arr[high_index]
-        reflect = reflect_lower + fraction * (reflect_higher - reflect_lower)
+        ln_beta_low = np.log(np.abs(betaarr[low_index]))
+        ln_beta_high = np.log(np.abs(betaarr[high_index]))
+        ln_beta = ln_beta_low + frac * (ln_beta_high - ln_beta_low)
+        beta_sign = np.sign(betaarr[high_index] if betaarr[high_index] != 0 else betaarr[low_index])
+        beta = beta_sign * np.exp(ln_beta)
 
         if beta != 0.0:
             inverse_mu = 1.239852 / (energy * 4.0 * np.pi * beta)
         else:
-            inverse_mu = np.Inf
+            inverse_mu = np.inf
 
         return f1, f2, delta, beta, graze_mrad, reflect, inverse_mu, atwt
 
-    def get_henke_single(self, name, density, energy_array):
-        AVOGADRO = 6.02204531e23
-        HC_ANGSTROMS = 12398.52
-        RE = 2.817938070e-13  # in cm
-
-        z_array, atwt = self.compound(name.strip(), density)
-        if len(z_array) == 0:
-            z_array = self.zcompound(name, z_array)
-            atwt = self.zatwt(z_array)
-
-        wo = np.where(z_array > 0)[0]
-
-        if len(wo) == 0:
-            print(
-                "Warning: get_henke_single() name=%s encountered error, will return",
-                name,
-            )
-            return 0, 0, 0, 0
-
-        z = wo + 1
-        if atwt != 0.0:
-            molecules_per_cc = density * AVOGADRO / atwt
-        else:
-            molecules_per_cc = 0.0
-
-        if len(wo) > 1:
-            energies_all, f1_all, f2_all, energies_extra, f1_extra, f2_extra = (
-                self.extra(ielement=z[0])
-            )
-        else:
-            energies_all, f1_all, f2_all, energies_extra, f1_extra, f2_extra = (
-                self.extra(ielement=z[0] - 1)
-            )
-
-        if isinstance(energy_array, float):
-            n_array = 1
-        else:
-            n_array = len(energy_array)
-        f1_array = np.zeros((n_array))
-        f2_array = np.zeros((n_array))
-        delta_array = np.zeros((n_array))
-        beta_array = np.zeros((n_array))
-
-        for i in range(n_array):
-            energy = energy_array
-            wavelength_angstroms = HC_ANGSTROMS / energy
-            constant = (
-                RE
-                * (1.0e-16 * wavelength_angstroms * wavelength_angstroms)
-                * molecules_per_cc
-                / (2.0 * np.pi)
-            )
-
-            wo = np.where(energies_all > energy)[0]
-            if len(wo) == 0:
-                hi_e_ind = 0
-            else:
-                hi_e_ind = wo[0]
-
-            wo = np.where(energies_all < energy)[0]
-            if len(wo) == 0:
-                lo_e_ind = len(energies_all) - 1
-            else:
-                lo_e_ind = wo[-1]
-
-            ln_lower_energy = np.log(energies_all[lo_e_ind])
-            ln_higher_energy = np.log(energies_all[hi_e_ind])
-            fraction = (np.log(energy) - ln_lower_energy) / (
-                ln_higher_energy - ln_lower_energy
-            )
-
-            f1_lower = f1_all[lo_e_ind]
-            f1_higher = f1_all[hi_e_ind]
-            f1_array[i] = f1_lower + fraction * (f1_higher - f1_lower)
-
-            ln_f2_lower = np.log(np.abs(f2_all[lo_e_ind]))
-            ln_f2_higher = np.log(np.abs(f2_all[hi_e_ind]))
-            f2_array[i] = np.exp(ln_f2_lower + fraction * (ln_f2_higher - ln_f2_lower))
-
-            delta_array[i] = constant * f1_array[i]
-            beta_array[i] = constant * f2_array[i]
-
-        return f1_array, f2_array, delta_array, beta_array
+    def get_henke_single(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Henke.get_henke_single is not used in the current pipeline. Use Henke.get_henke or Henke.array instead."
+        )
 
 
 henkedata = Henke()
