@@ -384,12 +384,13 @@ def _calculate_loss(
                 else loss_fn(bkg[indices], int_spec_tensor[indices])
             ) / len(elements)
 
-        # Calculate L1 regularization
-        l1_reg = sum(
-            torch.norm(tensors[elem], p=1)
-            for elem in elements
-            if elem in tensors and tensors[elem].requires_grad
-        )
+        # Calculate L1 regularization on amplitudes (A = 10 ** logA)
+        l1_reg = torch.tensor(0.0, device=int_spec_tensor.device)
+        for elem in elements:
+            if elem in tensors and tensors[elem].requires_grad:
+                logA = tensors[elem]
+                A = torch.pow(torch.tensor(10.0, device=logA.device), logA)
+                l1_reg = l1_reg + torch.norm(A, p=1)
 
         # Apply scaled L1 regularization
         return main_loss + (l1_lambda * scale_factor) * l1_reg, spec_fit, bkg
