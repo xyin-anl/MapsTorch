@@ -73,35 +73,32 @@ def snip_bkg(
     e_slope,
     e_quad,
     snip_width,
+    fwhm_offset,
+    fwhm_fanoprime,
     boxcar_size=5,
     device="cpu",
 ):
-    xmin, xmax = er[0], er[1]
-    energy = torch.arange(spec.shape[-1], device=device, dtype=spec.dtype).expand(spec.shape)
-    energy = e_offset + (energy * e_slope) + (energy**2 * e_quad)
-    tmp = (e_offset / 2.3548) ** 2 + energy * 2.96 * e_slope
-    tmp = torch.maximum(tmp, torch.zeros_like(tmp, device=device))
-
-    # Ensure spec is on the correct device
     spec = spec.to(device)
 
-    # Prepare input for conv1d
-    conv_input = spec.reshape(-1, 1, spec.shape[-1])
+    n_ch = spec.shape[-1]
+    local_idx = torch.arange(n_ch, device=device, dtype=spec.dtype)
+    ch0 = er[0]
+    global_idx = local_idx + ch0
 
-    # Conv1d operation
-    background = F.conv1d(
-        conv_input,
-        torch.ones(1, 1, boxcar_size, device=device, dtype=spec.dtype) / boxcar_size,
-        padding="same",
-    )
+    energy = e_offset + (e_slope * global_idx) + (e_quad * (global_idx**2))
+    sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * 2.96 * fwhm_fanoprime
+    sigma_sq = torch.clamp(sigma_sq, min=0.0)
+    current_width = snip_width * 2.35 * torch.sqrt(sigma_sq) / e_slope
 
-    # Reshape conv1d result to match original signal shape
-    background = background.view(spec.shape)
+    conv_input = spec.reshape(-1, 1, n_ch)
+    ones = torch.ones((1, 1, boxcar_size), dtype=spec.dtype, device=device)
+    background = F.conv1d(conv_input, ones / boxcar_size, padding="same")
 
-    current_width = snip_width * 2.35 * torch.sqrt(tmp) / e_slope
+    background = background.view_as(spec)
+
     background = torch.log(torch.log(background + 1) + 1)
-    max_of_xmin = max(xmin, 0)
-    min_of_xmax = min(xmax, spec.shape[-1] - 1)
+    max_of_xmin = 0
+    min_of_xmax = n_ch - 1
     for _ in range(2):
         background = snip_op(
             background, current_width, max_of_xmin, min_of_xmax, device=device
@@ -112,4 +109,4 @@ def snip_bkg(
         )
         current_width = current_width / M_SQRT2
     background = torch.exp(torch.exp(background) - 1) - 1
-    return torch.nan_to_num(background)
+    return torch.nan_to_num(background, nan=0.0, posinf=0.0, neginf=0.0)

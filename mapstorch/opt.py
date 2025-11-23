@@ -334,6 +334,8 @@ def _calculate_loss(
             tensors["ENERGY_SLOPE"],
             tensors["ENERGY_QUADRATIC"],
             tensors["SNIP_WIDTH"],
+            tensors["FWHM_OFFSET"],
+            tensors["FWHM_FANOPRIME"],
             device=int_spec_tensor.device,
         )
         if use_snip
