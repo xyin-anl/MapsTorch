@@ -96,7 +96,9 @@ def snip_bkg(
 
     background = background.view_as(spec)
 
-    background = torch.log(torch.log(background + 1) + 1)
+    # Log-compress once; avoids unnecessary double-log distortion
+    background = torch.log1p(background)
+    background = torch.nan_to_num(background, posinf=0.0, neginf=0.0)
     max_of_xmin = 0
     min_of_xmax = n_ch - 1
     for _ in range(2):
@@ -108,5 +110,5 @@ def snip_bkg(
             background, current_width, max_of_xmin, min_of_xmax, device=device
         )
         current_width = current_width / M_SQRT2
-    background = torch.exp(torch.exp(background) - 1) - 1
+    background = torch.expm1(background)
     return torch.nan_to_num(background, nan=0.0, posinf=0.0, neginf=0.0)
