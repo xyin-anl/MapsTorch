@@ -61,12 +61,24 @@ from mapstorch.default import (
 
 
 def init_elem_amps(
-    elem, spec, e_sct, e_offset, e_slope, e_consts=default_energy_consts, verbose=False
+    elem,
+    spec,
+    e_sct,
+    e_offset,
+    e_slope,
+    e_consts=default_energy_consts,
+    verbose=False,
+    *,
+    compton_angle=None,
 ):
     try:
         this_factor = 8.0
         if elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]:
-            e_energy = e_sct
+            if elem == "COMPTON_AMPLITUDE" and compton_angle is not None:
+                theta_rad = np.deg2rad(compton_angle)
+                e_energy = e_sct / (1.0 + (e_sct / 511.0) * (1.0 - np.cos(theta_rad)))
+            else:
+                e_energy = e_sct
             min_e = e_energy - 0.4
             max_e = e_energy + 0.4
         else:
@@ -76,7 +88,7 @@ def init_elem_amps(
         er_min = max(0, round((min_e - e_offset) / e_slope))
         er_max = min(spec.shape[-1] - 1, round((max_e - e_offset) / e_slope))
         er_size = (er_max + 1) - er_min
-        e_sum = np.sum(spec[..., er_min:er_max], axis=-1) / er_size
+        e_sum = np.sum(spec[..., er_min : er_max + 1], axis=-1) / er_size
         e_guess = np.log10(np.maximum(e_sum * this_factor + 0.01, 1.0))
         return e_guess
     except Exception:
@@ -127,6 +139,9 @@ def create_tensors(
             else:
                 init_val = 0.0
         else:
+            compton_angle_val = (
+                tensors["COMPTON_ANGLE"].item() if "COMPTON_ANGLE" in tensors else None
+            )
             init_val = init_elem_amps(
                 e,
                 spec,
@@ -134,14 +149,14 @@ def create_tensors(
                 tensors["ENERGY_OFFSET"].item(),
                 tensors["ENERGY_SLOPE"].item(),
                 verbose=verbose,
+                compton_angle=compton_angle_val,
             )
         tensors[e] = torch.tensor(init_val, requires_grad=True, device=device)
+        elem_lr = default_learning_rates.get(e, default_learning_rates["default_lr"])
         opt_configs.append(
             {
                 "params": tensors[e],
-                "lr": default_learning_rates.get(
-                    p, default_learning_rates["default_lr"]
-                ),
+                "lr": elem_lr,
             }
         )
     return tensors, opt_configs
