@@ -185,13 +185,22 @@ def model_elem_spec(
         if er_struct.check_binding_energy(elem_info, params["COHERENT_SCT_ENERGY"]):
             if er_struct.ptype.startswith("Ka"):
                 label = "K Alpha"
-                faktor = faktor / (1.0 + f_tail + f_step)
+                if use_tail:
+                    faktor = faktor / (1.0 + f_step + f_tail)
+                else:
+                    faktor = faktor / (1.0 + f_step)
             elif er_struct.ptype.startswith("Kb"):
                 label = "K Beta"
-                faktor = faktor / (1.0 + kb_f_tail + f_step)
+                if use_tail:
+                    faktor = faktor / (1.0 + f_step + kb_f_tail)
+                else:
+                    faktor = faktor / (1.0 + f_step)
             elif er_struct.ptype.startswith("L"):
                 label = "L Lines"
-                faktor = faktor / (1.0 + f_tail + f_step)
+                if use_tail:
+                    faktor = faktor / (1.0 + f_step + f_tail)
+                else:
+                    faktor = faktor / (1.0 + f_step)
             else:
                 pass
         else:
