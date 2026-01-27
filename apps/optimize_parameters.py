@@ -47,12 +47,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import marimo
 
-__generated_with = "0.10.2"
+__generated_with = "0.19.6"
 app = marimo.App(width="medium")
 
 
 @app.cell
-def _(__file__):
+def _():
     import sys
     from math import floor, ceil, acos, pi
     import numpy as np
@@ -60,7 +60,12 @@ def _(__file__):
     import marimo as mo
 
     from mapstorch.io import read_dataset, parse_override_params_file
-    from mapstorch.util import PeriodicTableWidget
+    from mapstorch.util import (
+        BranchingRatioWidget,
+        PeriodicTableWidget,
+        branching_value_to_maps_lines,
+        parse_maps_branching_lines,
+    )
     from mapstorch.constant import read_constants, define_constants
     from mapstorch.default import (
         default_fitting_elems,
@@ -72,19 +77,18 @@ def _(__file__):
         unsupported_elements,
         supported_elements_mapping,
     )
-
     return (
+        BranchingRatioWidget,
         PeriodicTableWidget,
         acos,
-        ceil,
+        branching_value_to_maps_lines,
+        parse_maps_branching_lines,
         default_elem_info,
-        default_energy_consts,
         default_fitting_elems,
         default_fitting_params,
         default_param_vals,
         default_pileups,
         define_constants,
-        floor,
         mo,
         np,
         parse_override_params_file,
@@ -93,7 +97,6 @@ def _(__file__):
         read_constants,
         read_dataset,
         supported_elements_mapping,
-        sys,
         unsupported_elements,
     )
 
@@ -175,13 +178,7 @@ def _(energy_range, int_spec_og, mo, peaks):
     mo.vstack(
         [incident_energy_slider, energy_range, compton_peak_slider, elastic_peak_slider]
     )
-    return (
-        compton_peak_slider,
-        compton_peak_value,
-        elastic_peak_slider,
-        elastic_peak_value,
-        incident_energy_slider,
-    )
+    return compton_peak_slider, elastic_peak_slider, incident_energy_slider
 
 
 @app.cell
@@ -248,7 +245,7 @@ def _(
     int_spec_fig.update_layout(showlegend=False)
 
     mo.ui.plotly(int_spec_fig)
-    return go, int_spec_fig, make_subplots
+    return go, make_subplots
 
 
 @app.cell
@@ -259,7 +256,12 @@ def _(mo):
 
 
 @app.cell
-def _(apply_override_button, mo, override_params_file, parse_override_params_file):
+def _(
+    apply_override_button,
+    mo,
+    override_params_file,
+    parse_override_params_file,
+):
     override_file_path = None
     override_params = None
     override_branching_text = ""
@@ -306,23 +308,34 @@ def _(override_params):
 
 
 @app.cell
-def _(mo, override_branching_text, override_pileups):
+def _(
+    BranchingRatioWidget,
+    mo,
+    override_branching_text,
+    override_pileups,
+    parse_maps_branching_lines,
+):
     pileups_text = mo.ui.text(
         value=", ".join(override_pileups) if override_pileups else "",
         label="Pileups",
     )
-    branching_overrides = mo.ui.text_area(
-        value=override_branching_text or "",
-        label="Branching ratio override lines",
-        full_width=True,
-    )
-    return branching_overrides, pileups_text
+    widget = BranchingRatioWidget()
+    if override_branching_text:
+        widget.value = parse_maps_branching_lines(override_branching_text)
+    branching_widget = mo.ui.anywidget(widget)
+    return branching_widget, pileups_text
+
+
+@app.cell
+def _(branching_value_to_maps_lines, branching_widget):
+    branching_overrides_text = branching_value_to_maps_lines(branching_widget.value)
+    return (branching_overrides_text,)
 
 
 @app.cell
 def _(
     apply_override_button,
-    branching_overrides,
+    branching_widget,
     mo,
     override_params_file,
     pileups_text,
@@ -334,7 +347,7 @@ def _(
             ),
             mo.hstack([override_params_file, apply_override_button], justify="start", gap=2),
             pileups_text,
-            branching_overrides,
+            branching_widget,
         ]
     )
     return (override_panel,)
@@ -348,19 +361,19 @@ def _(pileups_text):
         return [t.strip() for t in text.split(",") if t.strip()]
 
     custom_pileups = parse_csv(pileups_text.value)
-    return custom_pileups, parse_csv
+    return (custom_pileups,)
 
 
 @app.cell
 def _(custom_pileups, default_fitting_elems):
     extra_elems = [p for p in custom_pileups if p not in default_fitting_elems]
     available_fitting_elems = list(dict.fromkeys(list(default_fitting_elems) + extra_elems))
-    return available_fitting_elems, extra_elems
+    return (available_fitting_elems,)
 
 
 @app.cell
 def _(
-    branching_overrides,
+    branching_overrides_text,
     custom_pileups,
     default_elem_info,
     default_pileups,
@@ -413,7 +426,7 @@ def _(
 
     override_lines = [
         line.strip()
-        for line in branching_overrides.value.splitlines()
+        for line in branching_overrides_text.splitlines()
         if line.strip().startswith("BRANCHING_")
     ]
     overridden = []
@@ -453,12 +466,11 @@ def _(
             f"Pileups not found in constants (will be ignored): {', '.join(missing_pileups)}",
             kind="warning",
         )
-
-    return detector, missing_pileups, model_energy_consts, overridden, override_lines
+    return (model_energy_consts,)
 
 
 @app.cell
-def _(apply_override_button, configs, elem_selection, mo, override_panel, param_selection):
+def _(configs, elem_selection, mo, override_panel, param_selection):
     control_panel = mo.accordion(
         {
             "Elements": elem_selection.center(),
@@ -470,7 +482,7 @@ def _(apply_override_button, configs, elem_selection, mo, override_panel, param_
     )
     control_panel_shown = True
     control_panel
-    return control_panel, control_panel_shown
+    return (control_panel_shown,)
 
 
 @app.cell
@@ -482,8 +494,8 @@ def _(control_panel_shown, mo):
 
 @app.cell
 def _(
-    device_selection,
     detector_material,
+    device_selection,
     elem_checkboxes,
     energy_range,
     escape_factor,
@@ -491,9 +503,9 @@ def _(
     init_amp_checkbox,
     int_spec_og,
     iter_slider,
-    model_energy_consts,
     loss_selection,
     mo,
+    model_energy_consts,
     optimizer_selection,
     param_checkboxes,
     run_button,
@@ -531,15 +543,7 @@ def _(
             detector_type=detector_material.value,
             escape_factor=float(escape_factor.value),
         )
-    return (
-        bar,
-        fit_spec,
-        fitted_bkg,
-        fitted_spec,
-        fitted_tensors,
-        loss_trace,
-        n_iter,
-    )
+    return fitted_bkg, fitted_spec, fitted_tensors
 
 
 @app.cell
@@ -574,7 +578,7 @@ def _(fitted_bkg, fitted_spec, go, int_spec, make_subplots, mo, np, px):
         )
 
     mo.ui.plotly(fit_fig)
-    return fit_fig, fit_labels, spec_x
+    return fit_labels, spec_x
 
 
 @app.cell
@@ -602,7 +606,7 @@ def _(elem_checkboxes, fitted_tensors, go, make_subplots, mo):
     results_shown = True
 
     mo.ui.plotly(amp_fig)
-    return amp_fig, results_shown
+    return (results_shown,)
 
 
 @app.cell
@@ -651,9 +655,11 @@ def _(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
 
 @app.cell
 def _(
-    branching_overrides,
+    branching_overrides_text,
     dataset,
+    default_fitting_params,
     detector_material,
+    elem_checkboxes,
     energy_range,
     escape_factor,
     fitted_tensors,
@@ -662,12 +668,10 @@ def _(
     loss_selection,
     mo,
     optimizer_selection,
+    override_file_path,
     params_record,
     pileups_text,
-    default_fitting_params,
     use_snip_checkbox,
-    override_file_path,
-    elem_checkboxes,
 ):
     import pandas as pd
     import datetime
@@ -675,7 +679,7 @@ def _(
     selected_elems = ",".join([k for k, v in elem_checkboxes.items() if v.value])
     params_record["elements"].append(selected_elems)
     params_record["elements_with_pileup"].append(str(pileups_text.value or ""))
-    params_record["branching_overrides"].append(str(branching_overrides.value or ""))
+    params_record["branching_overrides"].append(str(branching_overrides_text or ""))
     params_record["detector_material"].append(str(detector_material.value or ""))
     params_record["escape_factor"].append(float(escape_factor.value))
     params_record["loss"].append(str(loss_selection.value or ""))
@@ -728,13 +732,13 @@ def _(detector_material, escape_factor, mo, params_table, save_params_button):
     aux_components = {"COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"}
     selected_row = params_table.value.iloc[0]
     selected_elements = [
-        e.strip()
-        for e in str(selected_row["elements"]).split(",")
-        if e.strip()
+        e.strip() for e in str(selected_row["elements"]).split(",") if e.strip()
     ]
     recorded_pileups = str(selected_row.get("elements_with_pileup", "") or "").strip()
     if recorded_pileups:
-        elements_with_pileup = [e.strip() for e in recorded_pileups.split(",") if e.strip()]
+        elements_with_pileup = [
+            e.strip() for e in recorded_pileups.split(",") if e.strip()
+        ]
     else:
         elements_with_pileup = [
             e
@@ -746,9 +750,15 @@ def _(detector_material, escape_factor, mo, params_table, save_params_button):
         for e in selected_elements
         if (e not in aux_components) and (e not in elements_with_pileup)
     ]
-    detector_material_to_write = str(selected_row.get("detector_material", detector_material.value) or "Si")
-    escape_factor_to_write = float(selected_row.get("escape_factor", float(escape_factor.value)) or 0.0)
-    branching_overrides_text = str(selected_row.get("branching_overrides", "") or "").strip()
+    detector_material_to_write = str(
+        selected_row.get("detector_material", detector_material.value) or "Si"
+    )
+    escape_factor_to_write = float(
+        selected_row.get("escape_factor", float(escape_factor.value)) or 0.0
+    )
+    _branching_overrides_text = str(
+        selected_row.get("branching_overrides", "") or ""
+    ).strip()
 
     write_override_params_file(
         "maps_fit_parameters_override.txt",
@@ -768,7 +778,7 @@ def _(detector_material, escape_factor, mo, params_table, save_params_button):
         },
         elements=elements_to_fit,
         elements_with_pileup=elements_with_pileup,
-        branching_ratio_lines=branching_overrides_text or None,
+        branching_ratio_lines=_branching_overrides_text or None,
         detector_material=detector_material_to_write,
         escape_factor=escape_factor_to_write,
     )
@@ -968,7 +978,13 @@ def _(
 
 
 @app.cell
-def _(default_fitting_params, load_params_button, mo, override_params, param_checkbox_vals):
+def _(
+    default_fitting_params,
+    load_params_button,
+    mo,
+    override_params,
+    param_checkbox_vals,
+):
     load_params_button
 
     param_checkboxes = {}
@@ -1034,13 +1050,10 @@ def _(device_list, mo, override_detector_material, override_escape_factor):
         configs,
         detector_material,
         device_selection,
-        detector_options,
         escape_factor,
         init_amp_checkbox,
         iter_slider,
         loss_selection,
-        model_options,
-        opt_options,
         optimizer_selection,
         use_snip_checkbox,
     )
@@ -1053,7 +1066,7 @@ def _():
     device_list = ["cpu"]
     if torch.cuda.is_available():
         device_list.append("cuda")
-    return device_list, torch
+    return (device_list,)
 
 
 @app.cell
@@ -1106,16 +1119,7 @@ def _(
         ]
     )
     params_record = {field: [] for field in record_fields}
-    return (
-        coherent_sct_energy,
-        compton_angle,
-        compton_energy,
-        copy,
-        energy_slope,
-        param_checkbox_vals,
-        param_default_vals,
-        params_record,
-    )
+    return param_checkbox_vals, param_default_vals, params_record
 
 
 @app.cell
@@ -1123,7 +1127,7 @@ def _(int_spec):
     from scipy.signal import find_peaks
 
     peaks, _ = find_peaks(int_spec, prominence=int_spec.max() / 200)
-    return find_peaks, peaks
+    return (peaks,)
 
 
 @app.cell
@@ -1143,7 +1147,7 @@ def _(dataset, dataset_button, elem_path, int_spec_path, mo, read_dataset):
     )
     int_spec_og = dataset_dict["int_spec"]
     elems = dataset_dict["elems"]
-    return dataset_dict, elems, int_spec_og
+    return elems, int_spec_og
 
 
 if __name__ == "__main__":
