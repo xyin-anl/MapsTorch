@@ -190,7 +190,12 @@ def create_dataset(
 
 
 def write_override_params_file(
-    output_path, param_values=None, elements=None, detector_material="Si", escape_factor=0.0
+    output_path,
+    param_values=None,
+    elements=None,
+    elements_with_pileup=None,
+    detector_material="Si",
+    escape_factor=0.0,
 ):
     """Write a maps_fit_parameters_override.txt file with specified parameters and elements.
 
@@ -198,6 +203,7 @@ def write_override_params_file(
         output_path: Path where to save the override file
         param_values: Dictionary of parameter values to override defaults
         elements: List of element names to fit
+        elements_with_pileup: Optional list of pileup combinations to fit (e.g. ["Si_Si", "Fe_Fe"])
         detector_material: Detector material (default: "Si")
 
     The function will use default values from mapstorch.default for any parameters
@@ -221,6 +227,12 @@ def write_override_params_file(
             raise ValueError(f"Unsupported elements: {invalid_elements}")
     else:
         elements = default_fitting_elems
+    if elements_with_pileup is None:
+        elements_with_pileup = []
+    elif isinstance(elements_with_pileup, str):
+        elements_with_pileup = [elements_with_pileup]
+    else:
+        elements_with_pileup = list(elements_with_pileup)
 
     # Merge provided params with defaults
     params = default_param_vals.copy()
@@ -256,7 +268,7 @@ def write_override_params_file(
         f.write(
             "   list the element combinations you want to fit for pileup, e.g., Si_Si, Si_Si_Si, Si_Cl, etc\n"
         )
-        f.write("ELEMENTS_WITH_PILEUP: \n")
+        f.write(f"ELEMENTS_WITH_PILEUP: {', '.join(elements_with_pileup)}\n")
 
         # Calibration parameters
         f.write("   offset of energy calibration, in kev\n")
