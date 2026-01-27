@@ -15,7 +15,7 @@ Key features:
 - Element selection decision support
 - Integration with existing [XRF-Maps](https://github.com/xyin-anl/XRF-Maps) workflows
 
-See [extended abstract](https://academic.oup.com/mam/article/30/Supplement_1/ozae044.1017/7720325) from M&M 2024.
+See [paper](https://doi.org/10.1107/S160057752501032X) for technical details.
 
 ## Get Started
 
