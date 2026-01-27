@@ -93,6 +93,11 @@ The `scripts` folder contains example scripts like `fit_spec.py` for fitting int
 python fit_spec.py DATASET.h5 -e 12.0
 ```
 
+If you have an override parameters file:
+```
+python fit_spec.py DATASET.h5 -e 12.0 --override_params_file parameters_override.txt
+```
+
 For all options:
 
 ```

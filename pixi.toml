@@ -6,19 +6,28 @@ authors = ["Xiangyu Yin <xyin@anl.gov>"]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
+[activation.env]
+LD_LIBRARY_PATH = "$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+
 [tasks]
 install = "python -m pip install -e ."
 
 [dependencies]
-h5py = "*"
-tqdm = "*"
+python = "3.10.*"
+pip = "*"
+
+# Core scientific stack (from conda-forge)
 numpy = "<2.0.0"
 scipy = "*"
 pandas = "*"
+h5py = "*"
+tqdm = "*"
 matplotlib = "*"
 plotly = "*"
-pip = "*"
-python = "3.10.*"
+
+# IMPORTANT: bring C++ runtime into the env so we don't use /lib64/libstdc++.so.6
+libstdcxx-ng = "*"
+libgcc-ng = "*"
 
 [pypi-dependencies]
 anywidget = "*"
