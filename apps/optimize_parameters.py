@@ -59,10 +59,16 @@ def _(__file__):
     import plotly.express as px
     import marimo as mo
 
-    from mapstorch.io import read_dataset
+    from mapstorch.io import read_dataset, parse_override_params_file
     from mapstorch.util import PeriodicTableWidget
+    from mapstorch.constant import read_constants, define_constants
     from mapstorch.default import (
         default_fitting_elems,
+        default_fitting_params,
+        default_param_vals,
+        default_energy_consts,
+        default_elem_info,
+        default_pileups,
         unsupported_elements,
         supported_elements_mapping,
     )
@@ -71,12 +77,20 @@ def _(__file__):
         PeriodicTableWidget,
         acos,
         ceil,
+        default_elem_info,
+        default_energy_consts,
         default_fitting_elems,
+        default_fitting_params,
+        default_param_vals,
+        default_pileups,
+        define_constants,
         floor,
         mo,
         np,
+        parse_override_params_file,
         pi,
         px,
+        read_constants,
         read_dataset,
         supported_elements_mapping,
         sys,
@@ -238,11 +252,218 @@ def _(
 
 
 @app.cell
-def _(configs, elem_selection, mo, param_selection):
+def _(mo):
+    override_params_file = mo.ui.file_browser(filetypes=[".txt"], multiple=False)
+    apply_override_button = mo.ui.run_button(label="Apply")
+    return apply_override_button, override_params_file
+
+
+@app.cell
+def _(apply_override_button, mo, override_params_file, parse_override_params_file):
+    override_file_path = None
+    override_params = None
+    override_branching_text = ""
+    if override_params_file.value:
+        override_file_path = override_params_file.value[0].path
+    if override_file_path and apply_override_button.value:
+        override_params = parse_override_params_file(override_file_path)
+        try:
+            with open(
+                override_file_path, "r", encoding="utf-8", errors="ignore"
+            ) as _fh:
+                lines = [
+                    line.rstrip("\n")
+                    for line in _fh
+                    if line.lstrip().startswith("BRANCHING_")
+                ]
+            override_branching_text = "\n".join(lines)
+        except Exception as e:
+            mo.callout(f"Failed to read branching ratio lines: {e}", kind="warning")
+        mo.callout(
+            f"Override parameters loaded from `{override_params_file.value[0].name}`.",
+            kind="success",
+        )
+    return override_branching_text, override_file_path, override_params
+
+
+@app.cell
+def _(override_params):
+    override_detector_material = None
+    override_escape_factor = None
+    override_elements_to_fit = None
+    override_pileups = []
+    if override_params is not None:
+        override_detector_material = override_params.get("detector_material", "Si")
+        override_escape_factor = float(override_params.get("escape_factor", 0.0))
+        override_elements_to_fit = override_params.get("elements_to_fit") or []
+        override_pileups = override_params.get("elements_with_pileup") or []
+    return (
+        override_detector_material,
+        override_elements_to_fit,
+        override_escape_factor,
+        override_pileups,
+    )
+
+
+@app.cell
+def _(mo, override_branching_text, override_pileups):
+    pileups_text = mo.ui.text(
+        value=", ".join(override_pileups) if override_pileups else "",
+        label="Pileups",
+    )
+    branching_overrides = mo.ui.text_area(
+        value=override_branching_text or "",
+        label="Branching ratio override lines",
+        full_width=True,
+    )
+    return branching_overrides, pileups_text
+
+
+@app.cell
+def _(
+    apply_override_button,
+    branching_overrides,
+    mo,
+    override_params_file,
+    pileups_text,
+):
+    override_panel = mo.vstack(
+        [
+            mo.md(
+                "Load a MAPS override file to seed parameters/elements, and optionally add pileups or branching ratio overrides."
+            ),
+            mo.hstack([override_params_file, apply_override_button], justify="start", gap=2),
+            pileups_text,
+            branching_overrides,
+        ]
+    )
+    return (override_panel,)
+
+
+@app.cell
+def _(pileups_text):
+    def parse_csv(text: str) -> list[str]:
+        if not text:
+            return []
+        return [t.strip() for t in text.split(",") if t.strip()]
+
+    custom_pileups = parse_csv(pileups_text.value)
+    return custom_pileups, parse_csv
+
+
+@app.cell
+def _(custom_pileups, default_fitting_elems):
+    extra_elems = [p for p in custom_pileups if p not in default_fitting_elems]
+    available_fitting_elems = list(dict.fromkeys(list(default_fitting_elems) + extra_elems))
+    return available_fitting_elems, extra_elems
+
+
+@app.cell
+def _(
+    branching_overrides,
+    custom_pileups,
+    default_elem_info,
+    default_pileups,
+    define_constants,
+    detector_material,
+    mo,
+    override_file_path,
+    override_params,
+    read_constants,
+):
+    import os
+    import tempfile
+
+    detector = detector_material.value
+
+    if override_params is not None and override_file_path:
+        try:
+            model_energy_consts = read_constants(override_file_path, default_elem_info)
+        except Exception as e:
+            mo.callout(f"Failed to read constants from override file: {e}", kind="danger")
+            all_pileups = sorted(set(list(default_pileups) + list(custom_pileups)))
+            model_energy_consts = define_constants(default_elem_info, all_pileups)
+        else:
+            extra_pileups = [p for p in custom_pileups if p not in model_energy_consts]
+            if extra_pileups:
+                _tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".txt", delete=False
+                    ) as _fh:
+                        _tmp_path = _fh.name
+                        _fh.write(
+                            f"ELEMENTS_WITH_PILEUP: {', '.join(extra_pileups)}\n"
+                        )
+                    extra_consts = read_constants(_tmp_path, default_elem_info)
+                    for p in extra_pileups:
+                        if p in extra_consts:
+                            model_energy_consts[p] = extra_consts[p]
+                except Exception as e:
+                    mo.callout(f"Failed to add pileups: {e}", kind="danger")
+                finally:
+                    if _tmp_path is not None:
+                        try:
+                            os.unlink(_tmp_path)
+                        except OSError:
+                            pass
+    else:
+        all_pileups = sorted(set(list(default_pileups) + list(custom_pileups)))
+        model_energy_consts = define_constants(default_elem_info, all_pileups)
+
+    override_lines = [
+        line.strip()
+        for line in branching_overrides.value.splitlines()
+        if line.strip().startswith("BRANCHING_")
+    ]
+    overridden = []
+    if override_lines:
+        _tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            ) as _fh:
+                _tmp_path = _fh.name
+                for line in override_lines:
+                    _fh.write(f"{line}\n")
+            adj_consts = read_constants(_tmp_path, default_elem_info)
+            for line in override_lines:
+                rhs = line.split(":", 1)[1].strip()
+                name = rhs.split(",", 1)[0].strip()
+                if name in adj_consts and name in model_energy_consts:
+                    model_energy_consts[name] = adj_consts[name]
+                    overridden.append(name)
+        except Exception as e:
+            mo.callout(f"Failed to apply branching ratio overrides: {e}", kind="danger")
+        finally:
+            if _tmp_path is not None:
+                try:
+                    os.unlink(_tmp_path)
+                except OSError:
+                    pass
+
+    use_si = detector == "Si"
+    for _pars in model_energy_consts.values():
+        for _par in _pars:
+            _par.mu_fraction = _par.Si_mu if use_si else _par.Ge_mu
+
+    missing_pileups = [p for p in custom_pileups if p not in model_energy_consts]
+    if missing_pileups:
+        mo.callout(
+            f"Pileups not found in constants (will be ignored): {', '.join(missing_pileups)}",
+            kind="warning",
+        )
+
+    return detector, missing_pileups, model_energy_consts, overridden, override_lines
+
+
+@app.cell
+def _(apply_override_button, configs, elem_selection, mo, override_panel, param_selection):
     control_panel = mo.accordion(
         {
             "Elements": elem_selection.center(),
             "Parameters": param_selection,
+            "Override": override_panel,
             "Configs": configs,
         },
         multiple=True,
@@ -262,12 +483,15 @@ def _(control_panel_shown, mo):
 @app.cell
 def _(
     device_selection,
+    detector_material,
     elem_checkboxes,
     energy_range,
+    escape_factor,
     fit_indices_list,
     init_amp_checkbox,
     int_spec_og,
     iter_slider,
+    model_energy_consts,
     loss_selection,
     mo,
     optimizer_selection,
@@ -303,6 +527,9 @@ def _(
             progress_bar=False,
             device=device_selection.value,
             status_updator=bar,
+            e_consts=model_energy_consts,
+            detector_type=detector_material.value,
+            escape_factor=float(escape_factor.value),
         )
     return (
         bar,
@@ -347,7 +574,7 @@ def _(fitted_bkg, fitted_spec, go, int_spec, make_subplots, mo, np, px):
         )
 
     mo.ui.plotly(fit_fig)
-    return fit_fig, fit_labels, i, spec, spec_log, spec_x
+    return fit_fig, fit_labels, spec_x
 
 
 @app.cell
@@ -375,7 +602,7 @@ def _(elem_checkboxes, fitted_tensors, go, make_subplots, mo):
     results_shown = True
 
     mo.ui.plotly(amp_fig)
-    return amp_fig, amps, results_shown, target_elems
+    return amp_fig, results_shown
 
 
 @app.cell
@@ -423,15 +650,46 @@ def _(confirm_range_button, elem_peak_indices, fit_indices_list, mo):
 
 
 @app.cell
-def _(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
+def _(
+    branching_overrides,
+    dataset,
+    detector_material,
+    energy_range,
+    escape_factor,
+    fitted_tensors,
+    init_amp_checkbox,
+    iter_slider,
+    loss_selection,
+    mo,
+    optimizer_selection,
+    params_record,
+    pileups_text,
+    default_fitting_params,
+    use_snip_checkbox,
+    override_file_path,
+    elem_checkboxes,
+):
     import pandas as pd
     import datetime
 
-    for par, l in params_record.items():
-        if par == "elements":
-            l.append(",".join([k for k, v in elem_checkboxes.items() if v.value]))
+    selected_elems = ",".join([k for k, v in elem_checkboxes.items() if v.value])
+    params_record["elements"].append(selected_elems)
+    params_record["elements_with_pileup"].append(str(pileups_text.value or ""))
+    params_record["branching_overrides"].append(str(branching_overrides.value or ""))
+    params_record["detector_material"].append(str(detector_material.value or ""))
+    params_record["escape_factor"].append(float(escape_factor.value))
+    params_record["loss"].append(str(loss_selection.value or ""))
+    params_record["optimizer"].append(str(optimizer_selection.value or ""))
+    params_record["n_iter"].append(int(iter_slider.value))
+    params_record["init_amp"].append(bool(init_amp_checkbox.value))
+    params_record["use_snip"].append(bool(use_snip_checkbox.value))
+    params_record["energy_range"].append(str(energy_range.value))
+    params_record["override_file"].append(str(override_file_path or ""))
+    for _param_name in default_fitting_params:
+        if _param_name in fitted_tensors:
+            params_record[_param_name].append(fitted_tensors[_param_name].item())
         else:
-            l.append(fitted_tensors[par].item())
+            params_record[_param_name].append(None)
     today = datetime.date.today()
     today_string = today.strftime("%Y-%m-%d")
     table_label = dataset.value[0].name + " parameter tuning record " + today_string
@@ -442,16 +700,7 @@ def _(dataset, elem_checkboxes, fitted_tensors, mo, params_record):
         show_download=False,
     )
     params_table
-    return (
-        datetime,
-        l,
-        par,
-        params_table,
-        pd,
-        table_label,
-        today,
-        today_string,
-    )
+    return (params_table,)
 
 
 @app.cell
@@ -472,31 +721,58 @@ def _(mo):
 
 
 @app.cell
-def _(mo, params_table, save_params_button):
+def _(detector_material, escape_factor, mo, params_table, save_params_button):
     mo.stop(not save_params_button.value)
     from mapstorch.io import write_override_params_file
+
+    aux_components = {"COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"}
+    selected_row = params_table.value.iloc[0]
+    selected_elements = [
+        e.strip()
+        for e in str(selected_row["elements"]).split(",")
+        if e.strip()
+    ]
+    recorded_pileups = str(selected_row.get("elements_with_pileup", "") or "").strip()
+    if recorded_pileups:
+        elements_with_pileup = [e.strip() for e in recorded_pileups.split(",") if e.strip()]
+    else:
+        elements_with_pileup = [
+            e
+            for e in selected_elements
+            if ("_" in e) and (not e.endswith("_L")) and (not e.endswith("_M"))
+        ]
+    elements_to_fit = [
+        e
+        for e in selected_elements
+        if (e not in aux_components) and (e not in elements_with_pileup)
+    ]
+    detector_material_to_write = str(selected_row.get("detector_material", detector_material.value) or "Si")
+    escape_factor_to_write = float(selected_row.get("escape_factor", float(escape_factor.value)) or 0.0)
+    branching_overrides_text = str(selected_row.get("branching_overrides", "") or "").strip()
 
     write_override_params_file(
         "maps_fit_parameters_override.txt",
         param_values={
-            "COHERENT_SCT_ENERGY": params_table.value.iloc[0][
-                "COHERENT_SCT_ENERGY"
-            ].item(),
-            "ENERGY_OFFSET": params_table.value.iloc[0]["ENERGY_OFFSET"].item(),
-            "ENERGY_SLOPE": params_table.value.iloc[0]["ENERGY_SLOPE"].item(),
-            "ENERGY_QUADRATIC": params_table.value.iloc[0]["ENERGY_QUADRATIC"].item(),
-            "COMPTON_ANGLE": params_table.value.iloc[0]["COMPTON_ANGLE"].item(),
-            "COMPTON_FWHM_CORR": params_table.value.iloc[0]["COMPTON_FWHM_CORR"].item(),
-            "COMPTON_HI_F_TAIL": params_table.value.iloc[0]["COMPTON_HI_F_TAIL"].item(),
-            "COMPTON_F_TAIL": params_table.value.iloc[0]["COMPTON_F_TAIL"].item(),
-            "FWHM_FANOPRIME": params_table.value.iloc[0]["FWHM_FANOPRIME"].item(),
-            "FWHM_OFFSET": params_table.value.iloc[0]["FWHM_OFFSET"].item(),
-            "F_TAIL_OFFSET": params_table.value.iloc[0]["F_TAIL_OFFSET"].item(),
-            "KB_F_TAIL_OFFSET": params_table.value.iloc[0]["KB_F_TAIL_OFFSET"].item(),
+            "COHERENT_SCT_ENERGY": float(selected_row["COHERENT_SCT_ENERGY"]),
+            "ENERGY_OFFSET": float(selected_row["ENERGY_OFFSET"]),
+            "ENERGY_SLOPE": float(selected_row["ENERGY_SLOPE"]),
+            "ENERGY_QUADRATIC": float(selected_row["ENERGY_QUADRATIC"]),
+            "COMPTON_ANGLE": float(selected_row["COMPTON_ANGLE"]),
+            "COMPTON_FWHM_CORR": float(selected_row["COMPTON_FWHM_CORR"]),
+            "COMPTON_HI_F_TAIL": float(selected_row["COMPTON_HI_F_TAIL"]),
+            "COMPTON_F_TAIL": float(selected_row["COMPTON_F_TAIL"]),
+            "FWHM_FANOPRIME": float(selected_row["FWHM_FANOPRIME"]),
+            "FWHM_OFFSET": float(selected_row["FWHM_OFFSET"]),
+            "F_TAIL_OFFSET": float(selected_row["F_TAIL_OFFSET"]),
+            "KB_F_TAIL_OFFSET": float(selected_row["KB_F_TAIL_OFFSET"]),
         },
-        elements=params_table.value.iloc[0]["elements"].split(","),
+        elements=elements_to_fit,
+        elements_with_pileup=elements_with_pileup,
+        branching_ratio_lines=branching_overrides_text or None,
+        detector_material=detector_material_to_write,
+        escape_factor=escape_factor_to_write,
     )
-    return (write_override_params_file,)
+    return
 
 
 @app.cell
@@ -542,7 +818,7 @@ def _(
 
     if focus_target_switch.value:
         range_fig.update_layout(shapes=elem_peak_shapes, overwrite=True)
-    return iii, range_fig, specc, specc_log
+    return (range_fig,)
 
 
 @app.cell
@@ -569,7 +845,7 @@ def _(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
     plot_elems = [k for k, v in elem_checkboxes.items() if v.value]
     elem_peak_indices = []
     elem_peak_shapes = []
-    for ii, ee in enumerate(plot_elems):
+    for ee in plot_elems:
         peak_rg = get_peak_ranges(
             [ee],
             fitted_tensors["COHERENT_SCT_ENERGY"].item(),
@@ -580,17 +856,17 @@ def _(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
             energy_range.value,
         )
         alpha = 0.2
-        for p_n, r in peak_rg.items():
+        for peak_name, peak_range in peak_rg.items():
             if (
-                p_n in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
-                or int(p_n[-1]) < energy_level_slider.value
+                peak_name in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+                or int(peak_name[-1]) < energy_level_slider.value
             ):
-                elem_peak_indices += list(range(*r))
+                elem_peak_indices += list(range(*peak_range))
                 elem_peak_shapes.append(
                     dict(
                         type="rect",
-                        x0=r[0],
-                        x1=r[1],
+                        x0=peak_range[0],
+                        x1=peak_range[1],
                         y0=0,
                         y1=1,
                         xref="x",
@@ -601,44 +877,51 @@ def _(elem_checkboxes, energy_level_slider, energy_range, fitted_tensors):
                         line_width=0,
                     )
                 )
-    return (
-        alpha,
-        ee,
-        elem_peak_indices,
-        elem_peak_shapes,
-        get_peak_ranges,
-        ii,
-        p_n,
-        peak_rg,
-        plot_elems,
-        r,
-    )
+    return elem_peak_indices, elem_peak_shapes
 
 
 @app.cell
-def _(param_checkbox_vals, param_default_vals, params_table):
+def _(override_params, param_checkbox_vals, param_default_vals, params_table):
     if len(params_table.value) > 0:
         for pp in params_table.value:
             if pp in param_checkbox_vals:
                 param_checkbox_vals[pp] = float(params_table.value[pp].item())
+    elif override_params is not None:
+        for pp in param_checkbox_vals:
+            if pp in override_params:
+                param_checkbox_vals[pp] = float(override_params[pp])
+            else:
+                param_checkbox_vals[pp] = float(param_default_vals[pp])
     else:
         for pp in param_checkbox_vals:
             param_checkbox_vals[pp] = float(param_default_vals[pp])
-    return (pp,)
+    return
 
 
 @app.cell
 def _(
     PeriodicTableWidget,
-    default_fitting_elems,
+    available_fitting_elems,
     elems,
     mo,
+    override_elements_to_fit,
     unsupported_elements,
 ):
     initial_selected_elems = set()
-    for e in default_fitting_elems:
-        if e in elems and not e in ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"]:
-            initial_selected_elems.add(e.split("_")[0])
+    if override_elements_to_fit:
+        for e in override_elements_to_fit:
+            if e in ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"]:
+                continue
+            if "_" in e:
+                parts = e.split("_")
+                if parts[-1] in ["L", "M"]:
+                    initial_selected_elems.add(parts[0])
+            else:
+                initial_selected_elems.add(e)
+    else:
+        for e in available_fitting_elems:
+            if e in elems and not e in ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"]:
+                initial_selected_elems.add(e.split("_")[0])
 
     elem_selection = mo.ui.anywidget(
         PeriodicTableWidget(
@@ -647,61 +930,91 @@ def _(
             initial_disabled=unsupported_elements,
         )
     )
-    return e, elem_selection, initial_selected_elems
+    return (elem_selection,)
 
 
 @app.cell
 def _(
-    default_fitting_elems,
+    available_fitting_elems,
+    custom_pileups,
+    default_pileups,
     elem_selection,
     mo,
+    override_elements_to_fit,
     supported_elements_mapping,
 ):
-    selected_lines = ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE", "Si_Si"]
-    for select_e in elem_selection.selected_elements:
-        for l_ in supported_elements_mapping[select_e]:
-            if l_ == "K":
-                selected_lines.append(select_e)
-            else:
-                selected_lines.append(select_e + "_" + l_)
+    selected_lines = ["COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"]
+
+    if override_elements_to_fit:
+        selected_lines.extend(list(override_elements_to_fit))
+    else:
+        selected_lines.extend(list(default_pileups))
+        for select_e in elem_selection.selected_elements:
+            for l_ in supported_elements_mapping[select_e]:
+                if l_ == "K":
+                    selected_lines.append(select_e)
+                else:
+                    selected_lines.append(select_e + "_" + l_)
+
+    selected_lines.extend(custom_pileups)
+    selected_lines = list(dict.fromkeys(selected_lines))
     elem_checkboxes = {}
-    for edf in default_fitting_elems:
-        if edf in selected_lines:
-            elem_checkboxes[edf] = mo.ui.checkbox(label=edf, value=True)
+    for elem_name in available_fitting_elems:
+        if elem_name in selected_lines:
+            elem_checkboxes[elem_name] = mo.ui.checkbox(label=elem_name, value=True)
         else:
-            elem_checkboxes[edf] = mo.ui.checkbox(label=edf, value=False)
-    return edf, elem_checkboxes, l_, select_e, selected_lines
+            elem_checkboxes[elem_name] = mo.ui.checkbox(label=elem_name, value=False)
+    return (elem_checkboxes,)
 
 
 @app.cell
-def _(default_fitting_params, load_params_button, mo, param_checkbox_vals):
+def _(default_fitting_params, load_params_button, mo, override_params, param_checkbox_vals):
     load_params_button
 
     param_checkboxes = {}
-    for p in default_fitting_params:
-        param_checkboxes[p] = [
-            mo.ui.checkbox(label=p, value=True),
+    use_override_seed = (override_params is not None) and (not bool(load_params_button.value))
+    for _param_name in default_fitting_params:
+        default_value = float(param_checkbox_vals[_param_name])
+        if use_override_seed and _param_name in override_params:
+            default_value = float(override_params[_param_name])
+        param_checkboxes[_param_name] = [
+            mo.ui.checkbox(label=_param_name, value=True),
             mo.ui.checkbox(label="Fix"),
-            mo.ui.text(value=str(param_checkbox_vals[p])),
+            mo.ui.text(value=str(default_value)),
         ]
 
     param_selection = mo.vstack(
         [
-            mo.hstack(param_checkboxes[p], justify="start", gap=0)
-            for p in default_fitting_params
+            mo.hstack(param_checkboxes[_param_name], justify="start", gap=0)
+            for _param_name in default_fitting_params
         ]
     )
-    return p, param_checkboxes, param_selection
+    return param_checkboxes, param_selection
 
 
 @app.cell
-def _(device_list, mo):
+def _(device_list, mo, override_detector_material, override_escape_factor):
     init_amp_checkbox = mo.ui.checkbox(label="Initialize amplitudes", value=True)
     use_snip_checkbox = mo.ui.checkbox(label="Use SNIP background", value=True)
     model_options = mo.hstack(
         [init_amp_checkbox, use_snip_checkbox],
         justify="start",
         gap=5,
+    )
+    detector_material = mo.ui.dropdown(
+        ["Si", "Ge"],
+        value=override_detector_material or "Si",
+        label="Detector material",
+    )
+    escape_factor = mo.ui.number(
+        value=float(override_escape_factor or 0.0),
+        step=0.0001,
+        label="Escape factor",
+    )
+    detector_options = mo.hstack(
+        [detector_material, escape_factor],
+        justify="start",
+        gap=2,
     )
     iter_slider = mo.ui.slider(
         value=500, start=100, stop=3000, step=50, label="number of iterations"
@@ -716,10 +1029,13 @@ def _(device_list, mo):
         justify="start",
         gap=2,
     )
-    configs = mo.vstack([model_options, opt_options])
+    configs = mo.vstack([model_options, detector_options, opt_options])
     return (
         configs,
+        detector_material,
         device_selection,
+        detector_options,
+        escape_factor,
         init_amp_checkbox,
         iter_slider,
         loss_selection,
@@ -750,11 +1066,12 @@ def _():
 def _(
     acos,
     compton_peak_slider,
+    default_fitting_params,
+    default_param_vals,
     elastic_peak_slider,
     incident_energy_slider,
     pi,
 ):
-    from mapstorch.default import default_param_vals, default_fitting_params
     from copy import copy
 
     coherent_sct_energy = incident_energy_slider.value
@@ -771,14 +1088,29 @@ def _(
     param_default_vals["ENERGY_SLOPE"] = energy_slope
     param_default_vals["COMPTON_ANGLE"] = compton_angle
     param_checkbox_vals = copy(param_default_vals)
-    params_record = {p: [] for p in default_fitting_params + ["elements"]}
+    record_fields = (
+        list(default_fitting_params)
+        + [
+            "elements",
+            "elements_with_pileup",
+            "branching_overrides",
+            "detector_material",
+            "escape_factor",
+            "loss",
+            "optimizer",
+            "n_iter",
+            "init_amp",
+            "use_snip",
+            "energy_range",
+            "override_file",
+        ]
+    )
+    params_record = {field: [] for field in record_fields}
     return (
         coherent_sct_energy,
         compton_angle,
         compton_energy,
         copy,
-        default_fitting_params,
-        default_param_vals,
         energy_slope,
         param_checkbox_vals,
         param_default_vals,

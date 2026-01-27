@@ -194,6 +194,7 @@ def write_override_params_file(
     param_values=None,
     elements=None,
     elements_with_pileup=None,
+    branching_ratio_lines=None,
     detector_material="Si",
     escape_factor=0.0,
 ):
@@ -204,6 +205,8 @@ def write_override_params_file(
         param_values: Dictionary of parameter values to override defaults
         elements: List of element names to fit
         elements_with_pileup: Optional list of pileup combinations to fit (e.g. ["Si_Si", "Fe_Fe"])
+        branching_ratio_lines: Optional branching ratio override lines (string or list of strings),
+            e.g. "BRANCHING_RATIO_ADJUSTMENT_K: Fe, 1., 1., 3.0, 1."
         detector_material: Detector material (default: "Si")
 
     The function will use default values from mapstorch.default for any parameters
@@ -233,6 +236,16 @@ def write_override_params_file(
         elements_with_pileup = [elements_with_pileup]
     else:
         elements_with_pileup = list(elements_with_pileup)
+    if branching_ratio_lines is None:
+        normalized_branching_lines = None
+    else:
+        if isinstance(branching_ratio_lines, str):
+            raw_lines = branching_ratio_lines.splitlines()
+        else:
+            raw_lines = list(branching_ratio_lines)
+        normalized_branching_lines = [
+            str(line).strip() for line in raw_lines if str(line).strip()
+        ]
 
     # Merge provided params with defaults
     params = default_param_vals.copy()
@@ -406,7 +419,17 @@ BRANCHING_RATIO_ADJUSTMENT_K: Cu, 1., 1., 1.0, 1.
 BRANCHING_RATIO_ADJUSTMENT_K: Zn, 1., 1., 1.0, 1.
     the parameter adds the escape peaks (offset) to the fit if larger than 0. You should not enable Si and Ge at the same time, ie, one of these two values should be zero
 """
-        f.write(branching_ratio_section)
+        if normalized_branching_lines is None:
+            f.write(branching_ratio_section)
+        else:
+            f.write(
+                "    branching ratio overrides (MAPS format). Lines should start with BRANCHING_...\n"
+            )
+            for line in normalized_branching_lines:
+                f.write(f"{line}\n")
+            f.write(
+                "    the parameter adds the escape peaks (offset) to the fit if larger than 0. You should not enable Si and Ge at the same time, ie, one of these two values should be zero\n"
+            )
         f.write(f"SI_ESCAPE_FACTOR: {si_escape_factor}\n")
         f.write(f"GE_ESCAPE_FACTOR: {ge_escape_factor}\n")
         f.write("    this parameter adds a component to the escape peak that depends linear on energy\n")
