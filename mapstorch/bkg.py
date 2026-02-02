@@ -51,15 +51,20 @@ from mapstorch.constant import M_SQRT2
 
 
 def snip_op(background, current_width, max_of_xmin, min_of_xmax, device):
-    range_tensor = torch.arange(background.shape[-1], device=device, dtype=background.dtype).expand(
+    n_ch = background.shape[-1]
+    range_tensor = torch.arange(n_ch, device=device, dtype=background.dtype).expand(
         background.shape
     )
-    lo_index = torch.clamp(range_tensor - current_width, max_of_xmin, min_of_xmax).to(
-        torch.int64
-    )
-    hi_index = torch.clamp(range_tensor + current_width, max_of_xmin, min_of_xmax).to(
-        torch.int64
-    )
+    # Handle NaN in current_width and ensure valid index range
+    current_width_safe = torch.nan_to_num(current_width, nan=0.0, posinf=float(n_ch - 1), neginf=0.0)
+    lo_raw = range_tensor - current_width_safe
+    hi_raw = range_tensor + current_width_safe
+    # Clamp and convert to int64 safely
+    lo_index = torch.clamp(lo_raw, max_of_xmin, min_of_xmax).to(torch.int64)
+    hi_index = torch.clamp(hi_raw, max_of_xmin, min_of_xmax).to(torch.int64)
+    # Extra safety: ensure indices are in valid range after int conversion
+    lo_index = torch.clamp(lo_index, 0, n_ch - 1)
+    hi_index = torch.clamp(hi_index, 0, n_ch - 1)
     avg_values = (
         torch.gather(background, -1, lo_index) + torch.gather(background, -1, hi_index)
     ) / 2
@@ -88,7 +93,13 @@ def snip_bkg(
     energy = e_offset + (e_slope * global_idx) + (e_quad * (global_idx**2))
     sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * 2.96 * fwhm_fanoprime
     sigma_sq = torch.clamp(sigma_sq, min=0.0)
-    current_width = snip_width * 2.35 * torch.sqrt(sigma_sq) / e_slope
+    # Clamp e_slope to avoid division by zero or very small values (can happen during
+    # aggressive optimization like LBFGS). Also handle NaN and clamp to valid range.
+    e_slope_safe = e_slope if not isinstance(e_slope, torch.Tensor) else torch.clamp(e_slope.abs(), min=1e-6)
+    current_width = snip_width * 2.35 * torch.sqrt(sigma_sq) / e_slope_safe
+    # Handle NaN (from numerical issues) and clamp to valid index range
+    current_width = torch.nan_to_num(current_width, nan=0.0, posinf=float(n_ch - 1), neginf=0.0)
+    current_width = torch.clamp(current_width, min=0.0, max=float(n_ch - 1))
 
     conv_input = spec.reshape(-1, 1, n_ch)
     ones = torch.ones((1, 1, boxcar_size), dtype=spec.dtype, device=device)
