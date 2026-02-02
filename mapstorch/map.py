@@ -74,8 +74,20 @@ def elastic_peak(params, ev, gain):
         (params["FWHM_OFFSET"] / 2.3548) ** 2
         + params["COHERENT_SCT_ENERGY"] * 2.96 * params["FWHM_FANOPRIME"]
     )
-    delta_energy = ev - params["COHERENT_SCT_ENERGY"]
-    counts = 10 ** params["COHERENT_SCT_AMPLITUDE"] * peak(gain, sigma, delta_energy)
+    coherent = params["COHERENT_SCT_ENERGY"]
+    amp = 10 ** params["COHERENT_SCT_AMPLITUDE"]
+
+    if isinstance(coherent, torch.Tensor) and coherent.ndim == ev.ndim - 1:
+        coherent = coherent.unsqueeze(-1)
+    if isinstance(sigma, torch.Tensor) and sigma.ndim == ev.ndim - 1:
+        sigma = sigma.unsqueeze(-1)
+    if isinstance(gain, torch.Tensor) and gain.ndim == ev.ndim - 1:
+        gain = gain.unsqueeze(-1)
+    if isinstance(amp, torch.Tensor) and amp.ndim == ev.ndim - 1:
+        amp = amp.unsqueeze(-1)
+
+    delta_energy = ev - coherent
+    counts = amp * peak(gain, sigma, delta_energy)
     return counts
 
 
@@ -89,38 +101,46 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
         (params["FWHM_OFFSET"] / 2.3548) ** 2
         + compton_E * 2.96 * params["FWHM_FANOPRIME"]
     )
+    # Broadcast per-spectrum scalars over the channel axis if needed.
+    if isinstance(compton_E, torch.Tensor) and compton_E.ndim == ev.ndim - 1:
+        compton_E = compton_E.unsqueeze(-1)
+    if isinstance(sigma, torch.Tensor) and sigma.ndim == ev.ndim - 1:
+        sigma = sigma.unsqueeze(-1)
+    if isinstance(gain, torch.Tensor) and gain.ndim == ev.ndim - 1:
+        gain = gain.unsqueeze(-1)
+
     delta_energy = ev - compton_E
 
-    norm = 1.0
-    if use_step and params["COMPTON_F_STEP"] > 0:
-        norm += params["COMPTON_F_STEP"]
-    if use_tail:
-        if params["COMPTON_F_TAIL"] > 0:
-            norm += params["COMPTON_F_TAIL"]
-        if params["COMPTON_HI_F_TAIL"] > 0:
-            norm += params["COMPTON_HI_F_TAIL"]
+    def _relu_param(name: str):
+        val = params.get(name, 0.0)
+        if isinstance(val, torch.Tensor):
+            return torch.relu(val)
+        return max(float(val), 0.0)
 
+    step_scale = _relu_param("COMPTON_F_STEP") if use_step else 0.0
+    tail_scale = _relu_param("COMPTON_F_TAIL") if use_tail else 0.0
+    hi_tail_scale = _relu_param("COMPTON_HI_F_TAIL") if use_tail else 0.0
+
+    if isinstance(step_scale, torch.Tensor) and step_scale.ndim == ev.ndim - 1:
+        step_scale = step_scale.unsqueeze(-1)
+    if isinstance(tail_scale, torch.Tensor) and tail_scale.ndim == ev.ndim - 1:
+        tail_scale = tail_scale.unsqueeze(-1)
+    if isinstance(hi_tail_scale, torch.Tensor) and hi_tail_scale.ndim == ev.ndim - 1:
+        hi_tail_scale = hi_tail_scale.unsqueeze(-1)
+
+    norm = 1.0 + step_scale + tail_scale + hi_tail_scale
     faktor = 10 ** params["COMPTON_AMPLITUDE"] / norm
 
     counts = faktor * peak(gain, sigma * params["COMPTON_FWHM_CORR"], delta_energy)
-
-    if use_step and params["COMPTON_F_STEP"] > 0:
-        counts.add_(
-            faktor * params["COMPTON_F_STEP"] * step(gain, sigma, delta_energy, compton_E)
-        )
+    if use_step:
+        counts = counts + faktor * step_scale * step(gain, sigma, delta_energy, compton_E)
     if use_tail:
-        if params["COMPTON_F_TAIL"] > 0:
-            counts.add_(
-                faktor
-                * params["COMPTON_F_TAIL"]
-                * tail(gain, sigma, delta_energy, params["COMPTON_GAMMA"])
-            )
-        if params["COMPTON_HI_F_TAIL"] > 0:
-            counts.add_(
-                faktor
-                * params["COMPTON_HI_F_TAIL"]
-                * tail(gain, sigma, -delta_energy, params["COMPTON_HI_GAMMA"])
-            )
+        counts = counts + faktor * tail_scale * tail(
+            gain, sigma, delta_energy, params["COMPTON_GAMMA"]
+        )
+        counts = counts + faktor * hi_tail_scale * tail(
+            gain, sigma, -delta_energy, params["COMPTON_HI_GAMMA"]
+        )
     return counts
 
 
@@ -134,20 +154,196 @@ def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
     else:
         detector_escape_E = 1.73998
 
+    # Treat the energy/channel axis as the last dimension; supports batched spectra.
     escape_spec = torch.zeros_like(spectra, device=device)
 
-    if ev.numel() < 2:
+    # Support batched spectra by assuming the energy/channel axis is the last dimension.
+    n_ch = ev.shape[-1]
+    if n_ch < 2:
         return escape_spec
 
-    delta_e = torch.mean(ev[1:] - ev[:-1]).item()
-    if delta_e <= 0:
-        return escape_spec
+    delta_e = torch.mean(ev[..., 1:] - ev[..., :-1], dim=-1)
+    valid = delta_e > 0
+    # Match historical behavior: if delta_e <= 0, return all zeros for that spectrum.
+    # Use a safe delta_e for computing bins, then mask the output.
+    delta_e_safe = torch.where(valid, delta_e, torch.ones_like(delta_e))
+    bins = torch.round(detector_escape_E / delta_e_safe).to(torch.int64)
 
-    bins = int(round(detector_escape_E / delta_e))
-    if bins < len(ev):
-        escape_spec[: len(ev) - bins] = spectra[bins:] * escape_factor
+    # For each spectrum: escape_spec[..., i] = spectra[..., i + bins] if in range else 0.
+    # Expand bins to match spectra leading dims (gather does not broadcast indices).
+    bins_view = bins
+    if bins_view.ndim < spectra.ndim - 1:
+        bins_view = bins_view.view((1,) * (spectra.ndim - 1 - bins_view.ndim) + bins_view.shape)
+    bins_exp = bins_view.expand(spectra.shape[:-1]).unsqueeze(-1)
 
-    return escape_spec
+    base = torch.arange(n_ch, device=device).view((1,) * (spectra.ndim - 1) + (n_ch,))
+    base = base.expand(spectra.shape[:-1] + (n_ch,))
+    idx = base + bins_exp
+    mask = idx < n_ch
+    idx_safe = torch.clamp(idx, 0, n_ch - 1)
+    shifted = torch.gather(spectra, -1, idx_safe) * escape_factor
+
+    out = shifted * mask.to(shifted.dtype)
+    if valid.ndim > 0:
+        # Broadcast per-spectrum validity over channel axis.
+        valid_view = valid
+        if valid_view.ndim < spectra.ndim - 1:
+            valid_view = valid_view.view((1,) * (spectra.ndim - 1 - valid_view.ndim) + valid_view.shape)
+        out = out * valid_view.expand(spectra.shape[:-1]).unsqueeze(-1).to(out.dtype)
+    elif not bool(valid.item()):
+        out = out * 0.0
+    return out
+
+
+def build_model_basis(
+    params,
+    energy_range,
+    elements_to_fit=default_fitting_elems,
+    *,
+    include_scatter=True,
+    device="cpu",
+    e_consts=default_energy_consts,
+    elem_info=default_elem_info,
+    detector_type="Si",
+    escape_factor=0.0,
+    verbose=False,
+):
+    """Build a linear basis (K, n_channels) for fitting per-spectrum amplitudes.
+
+    Each basis vector corresponds to a single component at *unit linear amplitude*.
+    The modeled spectrum for amplitudes A (n_spectra, K) is: `A @ basis`.
+
+    Notes:
+        - `energy_range` uses absolute channel indices (inclusive), consistent with `model_spec`.
+        - Energy/channel axis is the last dimension of the returned basis.
+        - Scatter components (Compton + elastic) are optionally appended.
+        - Escape peaks are incorporated as a linear operator when `escape_factor > 0`.
+    """
+    if energy_range is None or len(energy_range) != 2:
+        raise ValueError("energy_range must be a (start, stop) tuple of channel indices")
+    ch0, ch1 = int(energy_range[0]), int(energy_range[1])
+    if ch1 < ch0:
+        raise ValueError("energy_range stop must be >= start")
+
+    device = torch.device(device)
+    energy = torch.arange(ch0, ch1 + 1, device=device, dtype=torch.float32)
+    ev = (
+        params["ENERGY_OFFSET"]
+        + params["ENERGY_SLOPE"] * energy
+        + params["ENERGY_QUADRATIC"] * (energy**2)
+    )
+
+    # Preserve order but drop duplicates.
+    components = []
+    seen = set()
+    for elem in elements_to_fit:
+        if elem in seen:
+            continue
+        seen.add(elem)
+        components.append(elem)
+    if include_scatter:
+        for scatter in ("COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE"):
+            if scatter not in seen:
+                seen.add(scatter)
+                components.append(scatter)
+
+    basis_specs = []
+    basis_names = []
+    for comp in components:
+        try:
+            unit_params = dict(params)
+            if comp == "COHERENT_SCT_AMPLITUDE":
+                unit_params[comp] = torch.tensor(0.0, device=device, dtype=ev.dtype)
+                spec = elastic_peak(unit_params, ev, unit_params["ENERGY_SLOPE"])
+            elif comp == "COMPTON_AMPLITUDE":
+                unit_params[comp] = torch.tensor(0.0, device=device, dtype=ev.dtype)
+                spec = compton_peak(unit_params, ev, unit_params["ENERGY_SLOPE"], True, False)
+            else:
+                unit_params[comp] = torch.tensor(0.0, device=device, dtype=ev.dtype)
+                spec = model_elem_spec(
+                    unit_params,
+                    comp,
+                    ev,
+                    True,
+                    False,
+                    device=device,
+                    e_consts=e_consts,
+                    elem_info=elem_info,
+                )
+            basis_specs.append(spec)
+            basis_names.append(comp)
+        except Exception as exc:
+            if verbose:
+                print(f"Failed to build basis for {comp}: {exc}")
+
+    if not basis_specs:
+        raise RuntimeError("No basis components could be built; check elements_to_fit")
+
+    basis = torch.stack(basis_specs, dim=0)
+    if escape_factor > 0.0:
+        with torch.no_grad():
+            basis = basis + escape_peak(basis, ev, escape_factor, device, detector_type)
+    return basis, basis_names
+
+
+def _binding_energy_mask(er_struct, coherent_sct_energy, elem_info):
+    """Return a bool mask indicating whether a line is physically allowed.
+
+    Mirrors `EnergyStruct.check_binding_energy`, but supports tensor `coherent_sct_energy`
+    (e.g. per-spectrum or per-pixel tuning).
+    """
+    if getattr(er_struct, "type", 0) == 0:
+        return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
+
+    if getattr(er_struct, "is_pileup", False):
+        base_names = str(er_struct.name).split("_")
+        if len(base_names) != 2:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        el1_name, el2_name = base_names
+        e1 = next((e for e in elem_info if e.name == el1_name), None)
+        e2 = next((e for e in elem_info if e.name == el2_name), None)
+        if e1 is None or e2 is None:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        k1 = float(e1.bindingE.get("K", 0.0))
+        k2 = float(e2.bindingE.get("K", 0.0))
+        if k1 <= 0.0 or k2 <= 0.0:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        return (coherent_sct_energy > k1) & (coherent_sct_energy > k2)
+
+    elname = str(er_struct.name).split("_")[0]
+    e_info = next((e for e in elem_info if e.name == elname), None)
+    if e_info is None:
+        return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+
+    ptype = str(getattr(er_struct, "ptype", ""))
+    if ptype.startswith("K"):
+        thr = float(e_info.bindingE.get("K", 0.0))
+        if thr <= 0.0:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        return coherent_sct_energy > thr
+
+    if ptype.startswith("L"):
+        if ptype in ["Lb3", "Lb4", "Lg2", "Lg3", "Lg4"]:
+            key = "L1"
+        elif ptype in ["Lb1", "Lg1", "Ln"]:
+            key = "L2"
+        elif ptype in ["La1", "La2", "Lb2", "Ll"]:
+            key = "L3"
+        else:
+            return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
+        thr = float(e_info.bindingE.get(key, 0.0))
+        if thr <= 0.0:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        return coherent_sct_energy > thr
+
+    if ptype.startswith("M"):
+        thr = float(e_info.bindingE.get("M1", 0.0))
+        if thr <= 0.0:
+            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        return coherent_sct_energy > thr
+
+    return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
+
 
 def model_elem_spec(
     params,
@@ -161,57 +357,57 @@ def model_elem_spec(
 ):
     spec = torch.zeros_like(ev, device=device)
     pre_faktor = 10 ** params[element_to_fit]
+    if isinstance(pre_faktor, torch.Tensor) and pre_faktor.ndim == ev.ndim - 1:
+        pre_faktor = pre_faktor.unsqueeze(-1)
+
+    coherent = params["COHERENT_SCT_ENERGY"]
+    if isinstance(coherent, torch.Tensor) and coherent.ndim == ev.ndim - 1:
+        coherent = coherent.unsqueeze(-1)
+
+    energy_slope = params["ENERGY_SLOPE"]
+    if isinstance(energy_slope, torch.Tensor) and energy_slope.ndim == ev.ndim - 1:
+        energy_slope = energy_slope.unsqueeze(-1)
     for er_struct in e_consts[element_to_fit]:
         sigma = torch.sqrt(
             (params["FWHM_OFFSET"] / 2.3548) ** 2
             + er_struct.energy * 2.96 * params["FWHM_FANOPRIME"]
         )
+        if isinstance(sigma, torch.Tensor) and sigma.ndim == ev.ndim - 1:
+            sigma = sigma.unsqueeze(-1)
         f_step = torch.abs(
             er_struct.mu_fraction
             * (params["F_STEP_OFFSET"] + params["F_STEP_LINEAR"] * er_struct.energy)
         )
+        if isinstance(f_step, torch.Tensor) and f_step.ndim == ev.ndim - 1:
+            f_step = f_step.unsqueeze(-1)
         f_tail = torch.abs(
             params["F_TAIL_OFFSET"] + params["F_TAIL_LINEAR"] * er_struct.mu_fraction
         )
+        if isinstance(f_tail, torch.Tensor) and f_tail.ndim == ev.ndim - 1:
+            f_tail = f_tail.unsqueeze(-1)
         kb_f_tail = torch.abs(
             params["KB_F_TAIL_OFFSET"]
             + params["KB_F_TAIL_LINEAR"] * er_struct.mu_fraction
         )
+        if isinstance(kb_f_tail, torch.Tensor) and kb_f_tail.ndim == ev.ndim - 1:
+            kb_f_tail = kb_f_tail.unsqueeze(-1)
         if er_struct.ratio == 0 or er_struct.energy <= 0:
             continue
         delta_energy = ev - er_struct.energy
         faktor = er_struct.ratio * pre_faktor
-        label = ""
-        if er_struct.check_binding_energy(elem_info, params["COHERENT_SCT_ENERGY"]):
-            if er_struct.ptype.startswith("Ka"):
-                label = "K Alpha"
-                if use_tail:
-                    faktor = faktor / (1.0 + f_step + f_tail)
-                else:
-                    faktor = faktor / (1.0 + f_step)
-            elif er_struct.ptype.startswith("Kb"):
-                label = "K Beta"
-                if use_tail:
-                    faktor = faktor / (1.0 + f_step + kb_f_tail)
-                else:
-                    faktor = faktor / (1.0 + f_step)
-            elif er_struct.ptype.startswith("L"):
-                label = "L Lines"
-                if use_tail:
-                    faktor = faktor / (1.0 + f_step + f_tail)
-                else:
-                    faktor = faktor / (1.0 + f_step)
-            else:
-                pass
+
+        binding_ok = _binding_energy_mask(er_struct, coherent, elem_info).to(dtype=spec.dtype)
+        if er_struct.ptype.startswith("Ka") or er_struct.ptype.startswith("L"):
+            denom = 1.0 + f_step + (f_tail if use_tail else 0.0)
+        elif er_struct.ptype.startswith("Kb"):
+            denom = 1.0 + f_step + (kb_f_tail if use_tail else 0.0)
         else:
-            faktor = 0
-        spec.add_(faktor * peak(params["ENERGY_SLOPE"], sigma, delta_energy))
-        if f_step > 0 and use_step:
-            spec.add_(
-                faktor
-                * f_step
-                * step(params["ENERGY_SLOPE"], sigma, delta_energy, er_struct.energy)
-            )
+            denom = 1.0
+        faktor = (faktor / denom) * binding_ok
+
+        spec.add_(faktor * peak(energy_slope, sigma, delta_energy))
+        if use_step:
+            spec.add_(faktor * f_step * step(energy_slope, sigma, delta_energy, er_struct.energy))
         if use_tail:
             if er_struct.ptype in ["Kb1", "Kb2"]:
                 gamma = (
@@ -221,10 +417,12 @@ def model_elem_spec(
                     )
                     * er_struct.width_multi
                 )
+                if isinstance(gamma, torch.Tensor) and gamma.ndim == ev.ndim - 1:
+                    gamma = gamma.unsqueeze(-1)
                 spec.add_(
                     faktor
                     * kb_f_tail
-                    * tail(params["ENERGY_SLOPE"], sigma, delta_energy, gamma)
+                    * tail(energy_slope, sigma, delta_energy, gamma)
                 )
             if er_struct.ptype in [
                 "Ka1",
@@ -249,10 +447,12 @@ def model_elem_spec(
                     )
                     * er_struct.width_multi
                 )
+                if isinstance(gamma, torch.Tensor) and gamma.ndim == ev.ndim - 1:
+                    gamma = gamma.unsqueeze(-1)
                 spec.add_(
                     faktor
                     * f_tail
-                    * tail(params["ENERGY_SLOPE"], sigma, delta_energy, gamma)
+                    * tail(energy_slope, sigma, delta_energy, gamma)
                 )
     return spec
 
@@ -267,18 +467,38 @@ def model_spec(
     detector_type="Si", # "Si" or "Ge"
     escape_factor=0.0,
 ):
-    agr_spec = torch.zeros(energy_range[1] - energy_range[0] + 1, device=device)
+    # Determine batch shape (if any) from provided parameters. Batched parameters are
+    # expected to be shaped like `batch_shape` or `batch_shape + (1,)`.
+    batch_shape = ()
+    for v in params.values():
+        if isinstance(v, torch.Tensor) and v.ndim > 0:
+            batch_shape = v.shape[:-1] if v.shape[-1] == 1 else v.shape
+            break
+
     energy = torch.arange(
         energy_range[0],
         energy_range[1] + 1,
         device=device,
         dtype=torch.float32,
     )
-    ev = (
-        params["ENERGY_OFFSET"]
-        + params["ENERGY_SLOPE"] * energy
-        + params["ENERGY_QUADRATIC"] * (energy**2)
-    )
+    if batch_shape:
+        energy = energy.view((1,) * len(batch_shape) + (energy.numel(),))
+
+    def _as_channel_broadcast(val):
+        if not isinstance(val, torch.Tensor) or val.ndim == 0:
+            return val
+        if batch_shape and tuple(val.shape) == tuple(batch_shape):
+            return val.unsqueeze(-1)
+        return val
+
+    energy_offset = _as_channel_broadcast(params["ENERGY_OFFSET"])
+    energy_slope = _as_channel_broadcast(params["ENERGY_SLOPE"])
+    energy_quadratic = _as_channel_broadcast(params["ENERGY_QUADRATIC"])
+
+    ev = energy_offset + energy_slope * energy + energy_quadratic * (energy**2)
+    if batch_shape and tuple(ev.shape[:-1]) != tuple(batch_shape):
+        ev = ev.expand(batch_shape + (ev.shape[-1],))
+    agr_spec = torch.zeros_like(ev)
     for e in elements_to_fit:
         if e in e_consts and not e in [
             "COMPTON_AMPLITUDE",
@@ -298,8 +518,8 @@ def model_spec(
                 agr_spec.add_(element_spec)
             except Exception:
                 print("Failed to model spectrum for", e)
-    elastic_spec = elastic_peak(params, ev, params["ENERGY_SLOPE"])
-    compton_spec = compton_peak(params, ev, params["ENERGY_SLOPE"], True, False)
+    elastic_spec = elastic_peak(params, ev, energy_slope)
+    compton_spec = compton_peak(params, ev, energy_slope, True, False)
     agr_spec.add_(elastic_spec)
     agr_spec.add_(compton_spec)
     if escape_factor > 0.0:
