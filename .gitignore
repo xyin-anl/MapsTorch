@@ -142,6 +142,7 @@ results/*
 bin/*
 data/*
 examples/*
+*runs/*
 *.pkl
 *.pickle
 *.npy
