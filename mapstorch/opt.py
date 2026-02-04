@@ -49,6 +49,15 @@ from tqdm import trange
 import numpy as np
 import torch
 from mapstorch.bkg import snip_bkg
+from mapstorch.losses import compute_loss
+from mapstorch.metrics import (
+    build_element_roi_masks,
+    build_roi_weights,
+    mmd_rbf_multiscale,
+    shift_blur_1d,
+    to_distribution,
+    wasserstein1_shift,
+)
 from mapstorch.map import model_spec, build_model_basis
 from mapstorch.default import (
     default_fitting_elems,
@@ -310,6 +319,7 @@ def fit_spec(
     init_amp=True,
     use_snip=True,
     loss="mse",
+    loss_params=None,
     optimizer="adam",
     n_iter=500,
     l1_lambda=0.0,
@@ -328,7 +338,9 @@ def fit_spec(
     lbfgs_history_size=10,
     lbfgs_line_search_fn="strong_wolfe",
 ):
-    assert loss in ["mse", "l1"], "Loss function not supported"
+    assert loss in ["mse", "l1", "poisson_nll", "poisson_deviance", "chi2"], (
+        "Loss function not supported"
+    )
     assert optimizer in ["adam", "adamw", "lbfgs"], "Optimizer not supported"
 
     elements = [
@@ -370,12 +382,8 @@ def fit_spec(
             device=device,
         )
 
-    if loss == "mse":
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-    elif loss == "l1":
-        loss_fn = torch.nn.L1Loss(reduction="sum")
-    else:
-        raise ValueError("Loss function not supported")
+    if loss_params is None:
+        loss_params = {}
 
     if optimizer == "adam":
         optimizer = torch.optim.Adam(opt_configs)
@@ -407,7 +415,8 @@ def fit_spec(
                     elements,
                     use_snip,
                     indices,
-                    loss_fn,
+                    loss,
+                    loss_params,
                     l1_lambda,
                     e_consts,
                     elem_info,
@@ -427,7 +436,8 @@ def fit_spec(
                                 elements,
                                 use_snip,
                                 indices,
-                                loss_fn,
+                                loss,
+                                loss_params,
                                 l1_lambda,
                                 e_consts,
                                 elem_info,
@@ -447,7 +457,8 @@ def fit_spec(
                 elements,
                 use_snip,
                 indices,
-                loss_fn,
+                loss,
+                loss_params,
                 l1_lambda,
                 e_consts,
                 elem_info,
@@ -468,12 +479,25 @@ def fit_spec(
         if status_updator is not None:
             status_updator.update()
 
-    return (
-        tensors,
-        spec_fit.detach().cpu().numpy(),
-        bkg.detach().cpu().numpy(),
-        loss_trace,
-    )
+    if spec_fit is None or bkg is None:
+        with torch.no_grad():
+            _, spec_fit, bkg = _calculate_loss(
+                tensors,
+                int_spec_tensor,
+                energy_range,
+                elements,
+                use_snip,
+                indices,
+                loss,
+                loss_params,
+                l1_lambda,
+                e_consts,
+                elem_info,
+                detector_type,
+                escape_factor,
+            )
+
+    return (tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_trace)
 
 
 def fit_spec_batch(
@@ -489,6 +513,7 @@ def fit_spec_batch(
     init_amp=False,
     use_snip=True,
     loss="mse",
+    loss_params=None,
     optimizer="adamw",
     n_iter=200,
     l1_lambda=0.0,
@@ -511,7 +536,9 @@ def fit_spec_batch(
     `spectra` can have any batch shape as long as `energy_dim` identifies the
     energy/channel axis.
     """
-    assert loss in ["mse", "l1"], "Loss function not supported"
+    assert loss in ["mse", "l1", "poisson_nll", "poisson_deviance", "chi2"], (
+        "Loss function not supported"
+    )
     assert optimizer in ["adam", "adamw", "lbfgs"], "Optimizer not supported"
 
     if device == "cuda" and not torch.cuda.is_available():
@@ -571,10 +598,8 @@ def fit_spec_batch(
 
     spec_roi = spec[..., ch0 : ch1 + 1]
 
-    if loss == "mse":
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-    else:
-        loss_fn = torch.nn.L1Loss(reduction="sum")
+    if loss_params is None:
+        loss_params = {}
 
     if optimizer == "adam":
         optim = torch.optim.Adam(opt_configs)
@@ -604,7 +629,8 @@ def fit_spec_batch(
             elements,
             use_snip,
             indices=None,
-            loss_fn=loss_fn,
+            loss=loss,
+            loss_params=loss_params,
             l1_lambda=l1_lambda,
             e_consts=e_consts,
             elem_info=elem_info,
@@ -625,12 +651,25 @@ def fit_spec_batch(
         if status_updator is not None:
             status_updator.update()
 
-    return (
-        tensors,
-        spec_fit.detach().cpu().numpy(),
-        bkg.detach().cpu().numpy(),
-        loss_trace,
-    )
+    if spec_fit is None or bkg is None:
+        with torch.no_grad():
+            _, spec_fit, bkg = _calculate_loss(
+                tensors,
+                spec_roi,
+                energy_range,
+                elements,
+                use_snip,
+                indices=None,
+                loss=loss,
+                loss_params=loss_params,
+                l1_lambda=l1_lambda,
+                e_consts=e_consts,
+                elem_info=elem_info,
+                detector_type=detector_type,
+                escape_factor=escape_factor,
+            )
+
+    return (tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_trace)
 
 
 def solve_mca_amplitudes(
@@ -837,6 +876,7 @@ def fit_mca_arr(
     init_amp=True,
     use_snip=True,
     loss="mse",
+    loss_params=None,
     optimizer="adamw",
     n_iter=500,
     amp_method="ridge",
@@ -886,6 +926,7 @@ def fit_mca_arr(
         init_amp=init_amp,
         use_snip=use_snip,
         loss=loss,
+        loss_params=loss_params,
         optimizer=optimizer,
         n_iter=n_iter,
         progress_bar=progress_bar,
@@ -931,7 +972,8 @@ def _calculate_loss(
     elements,
     use_snip,
     indices,
-    loss_fn,
+    loss,
+    loss_params,
     l1_lambda,
     e_consts,
     elem_info,
@@ -964,24 +1006,175 @@ def _calculate_loss(
         escape_factor=escape_factor,
     )
 
-    # Calculate main loss
-    main_loss = (
-        loss_fn(spec_fit + bkg, int_spec_tensor)
-        if indices is None
-        else loss_fn(
-            spec_fit[..., indices] + bkg[..., indices], int_spec_tensor[..., indices]
+    if loss_params is None:
+        loss_params = {}
+    channel_weights = loss_params.get("channel_weights", None)
+    if channel_weights is not None:
+        channel_weights = torch.as_tensor(
+            channel_weights, device=int_spec_tensor.device, dtype=int_spec_tensor.dtype
         )
+
+    total_loss = compute_loss(
+        spec_fit + bkg,
+        int_spec_tensor,
+        loss=loss,
+        indices=indices,
+        weights=channel_weights,
+        eps=float(loss_params.get("eps", 1e-6)),
+        sigma2_floor=float(loss_params.get("sigma2_floor", 0.0)),
+        chi2_variant=str(loss_params.get("chi2_variant", "pearson")),
+        reduction=str(loss_params.get("reduction", "sum")),
     )
+
+    # Optional ROI-focused auxiliary loss (to emphasize weak peaks / chemistry-relevant regions).
+    roi_lambda = float(loss_params.get("roi_lambda", 0.0))
+    if roi_lambda != 0.0:
+        roi_profile = str(loss_params.get("roi_profile", "box"))
+        roi_n_sigma = float(loss_params.get("roi_n_sigma", 3.0))
+        roi_on_peaknet = bool(loss_params.get("roi_on_peaknet", False))
+        roi_reduction = str(loss_params.get("roi_reduction", "weighted_mean"))
+
+        roi_weights = build_roi_weights(
+            tensors,
+            energy_range,
+            elements_to_fit=elements,
+            roi_n_sigma=roi_n_sigma,
+            profile=roi_profile,  # type: ignore[arg-type]
+            include_scatter=bool(loss_params.get("roi_include_scatter", True)),
+            allowed_lines_only=bool(loss_params.get("roi_allowed_lines_only", True)),
+            e_consts=e_consts,
+            elem_info=elem_info,
+            eps=float(loss_params.get("eps", 1e-6)),
+        )
+
+        if roi_on_peaknet:
+            pred_roi = spec_fit
+            obs_roi = torch.relu(int_spec_tensor - bkg)
+        else:
+            pred_roi = spec_fit + bkg
+            obs_roi = int_spec_tensor
+
+        roi_loss = compute_loss(
+            pred_roi,
+            obs_roi,
+            loss=loss,
+            indices=indices,
+            weights=roi_weights,
+            eps=float(loss_params.get("eps", 1e-6)),
+            sigma2_floor=float(loss_params.get("sigma2_floor", 0.0)),
+            chi2_variant=str(loss_params.get("chi2_variant", "pearson")),
+            reduction=roi_reduction,  # type: ignore[arg-type]
+        )
+        total_loss = total_loss + roi_lambda * roi_loss
+
+    # Optional distribution/shape loss (shift-tolerant peak-structure matching).
+    shape_lambda = float(loss_params.get("shape_lambda", 0.0))
+    if shape_lambda != 0.0:
+        shape_metric = str(loss_params.get("shape_metric", "w1"))
+        shape_on_peaknet = bool(loss_params.get("shape_on_peaknet", True))
+        shape_reduction = str(loss_params.get("shape_reduction", "mean"))
+        eps_shape = float(loss_params.get("shape_eps", loss_params.get("eps", 1e-6)))
+
+        if shape_on_peaknet:
+            obs_mass = torch.relu(int_spec_tensor - bkg)
+            pred_mass = torch.relu(spec_fit)
+        else:
+            obs_mass = torch.relu(int_spec_tensor)
+            pred_mass = torch.relu(spec_fit + bkg)
+
+        p = to_distribution(obs_mass, eps=eps_shape)
+        q = to_distribution(pred_mass, eps=eps_shape)
+
+        shift_mode = str(loss_params.get("shape_shift_mode", "none"))
+        max_shift = int(loss_params.get("shape_shift_max", 0))
+        blur_sigma = float(loss_params.get("shape_shift_sigma", 1.0))
+        softmin_tau = float(loss_params.get("shape_shift_tau", 0.05))
+
+        if shape_metric == "w1":
+            shape_loss = wasserstein1_shift(
+                p,
+                q,
+                dx=float(loss_params.get("shape_dx", 1.0)),
+                shift_mode=shift_mode,  # type: ignore[arg-type]
+                max_shift=max_shift,
+                blur_sigma=blur_sigma,
+                softmin_tau=softmin_tau,
+                reduction=shape_reduction,  # type: ignore[arg-type]
+                eps=eps_shape,
+            )
+        elif shape_metric == "mmd_rbf":
+            if shift_mode == "blur" and max_shift > 0:
+                q = to_distribution(
+                    shift_blur_1d(q, max_shift=max_shift, sigma=blur_sigma, eps=eps_shape),
+                    eps=eps_shape,
+                )
+            sigmas = loss_params.get("shape_mmd_sigmas", [1.0, 2.0, 4.0, 8.0])
+            shape_loss = mmd_rbf_multiscale(
+                p,
+                q,
+                sigmas=[float(s) for s in sigmas],
+                truncate=float(loss_params.get("shape_mmd_truncate", 3.0)),
+                reduction=shape_reduction,  # type: ignore[arg-type]
+            )
+        else:
+            raise ValueError(f"Unsupported shape_metric={shape_metric!r}")
+
+        total_loss = total_loss + shape_lambda * shape_loss
+
+    # Optional peak-area loss (matches integrated net areas in per-element ROIs).
+    area_lambda = float(loss_params.get("area_lambda", 0.0))
+    if area_lambda != 0.0:
+        area_roi_n_sigma = float(loss_params.get("area_roi_n_sigma", 3.0))
+        area_mode = str(loss_params.get("area_mode", "relative_l1"))
+        area_on_peaknet = bool(loss_params.get("area_on_peaknet", True))
+        area_include_scatter = bool(loss_params.get("area_include_scatter", False))
+        area_allowed_lines_only = bool(loss_params.get("area_allowed_lines_only", True))
+        eps_area = float(loss_params.get("area_eps", loss_params.get("eps", 1e-6)))
+
+        if area_on_peaknet:
+            obs_net = torch.relu(int_spec_tensor - bkg)
+            pred_net = torch.relu(spec_fit)
+        else:
+            obs_net = torch.relu(int_spec_tensor)
+            pred_net = torch.relu(spec_fit + bkg)
+
+        masks = build_element_roi_masks(
+            tensors,
+            energy_range,
+            elements_to_fit=elements,
+            roi_n_sigma=area_roi_n_sigma,
+            include_scatter=area_include_scatter,
+            allowed_lines_only=area_allowed_lines_only,
+            e_consts=e_consts,
+            elem_info=elem_info,
+            eps=eps_area,
+        )
+
+        per_elem_losses = []
+        for name, mask in masks.items():
+            if not area_include_scatter and name in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]:
+                continue
+            area_obs = torch.sum(obs_net * mask, dim=-1)
+            area_pred = torch.sum(pred_net * mask, dim=-1)
+            if area_mode == "relative_l1":
+                denom = torch.abs(area_obs).clamp_min(eps_area)
+                per = torch.abs(area_pred - area_obs) / denom
+            elif area_mode == "l2":
+                per = (area_pred - area_obs) ** 2
+            else:
+                raise ValueError(f"Unsupported area_mode={area_mode!r}")
+            per_elem_losses.append(per)
+
+        if per_elem_losses:
+            area_loss = torch.mean(torch.stack(per_elem_losses, dim=0))
+            total_loss = total_loss + area_lambda * area_loss
 
     # Only calculate L1 regularization if l1_lambda is non-zero
     if l1_lambda > 0:
         # Calculate the scaling factor based on spectrum intensity
         with torch.no_grad():
-            scale_factor = (
-                loss_fn(bkg, int_spec_tensor)
-                if indices is None
-                else loss_fn(bkg[..., indices], int_spec_tensor[..., indices])
-            ) / len(elements)
+            ref = int_spec_tensor if indices is None else int_spec_tensor[..., indices]
+            scale_factor = torch.sum(ref) / max(len(elements), 1)
 
         # Calculate L1 regularization on amplitudes (A = 10 ** logA)
         l1_reg = torch.tensor(0.0, device=int_spec_tensor.device)
@@ -992,6 +1185,6 @@ def _calculate_loss(
                 l1_reg = l1_reg + torch.norm(A, p=1)
 
         # Apply scaled L1 regularization
-        return main_loss + (l1_lambda * scale_factor) * l1_reg, spec_fit, bkg
+        return total_loss + (l1_lambda * scale_factor) * l1_reg, spec_fit, bkg
 
-    return main_loss, spec_fit, bkg
+    return total_loss, spec_fit, bkg
