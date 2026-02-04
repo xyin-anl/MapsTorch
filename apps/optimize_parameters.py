@@ -1035,7 +1035,11 @@ def _(device_list, mo, override_detector_material, override_escape_factor):
     iter_slider = mo.ui.slider(
         value=500, start=100, stop=3000, step=50, label="number of iterations"
     )
-    loss_selection = mo.ui.dropdown(["mse", "l1"], value="mse", label="loss")
+    loss_selection = mo.ui.dropdown(
+        ["mse", "l1", "poisson_deviance", "poisson_nll", "chi2"],
+        value="mse",
+        label="loss",
+    )
     optimizer_selection = mo.ui.dropdown(
         ["adam", "adamw"], value="adam", label="optimizer"
     )
