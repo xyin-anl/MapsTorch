@@ -513,3 +513,242 @@ def plot_elem_markers(
     if mode in ("contribs", "contributions", "spec"):
         return plot_elem_spec_contribs(tensors, int_spec, energy_range, **kwargs)
     raise ValueError(f"Unsupported mode '{mode}'.")
+
+
+def _as_numpy(arr):
+    if isinstance(arr, torch.Tensor):
+        return arr.detach().cpu().numpy()
+    return np.asarray(arr)
+
+
+def _select_map_view(amp_maps, map_index=None):
+    """Return an image-like map view (H, W, K) from amp_maps shaped (*map_shape, K).
+
+    A single map dimension is promoted to a 1 x N image so line scans can still
+    be visualized. If amp_maps has more than 2 map dimensions, `map_index`
+    selects the leading indices so the returned view is 2D.
+    """
+    amp_maps = _as_numpy(amp_maps)
+    if amp_maps.ndim < 2:
+        raise ValueError("amp_maps must have shape (*map_shape, n_components)")
+
+    map_ndim = amp_maps.ndim - 1
+    if map_ndim < 1:
+        raise ValueError("amp_maps must have at least 1 map dimension")
+
+    if map_ndim == 1:
+        return amp_maps[np.newaxis, ...]
+
+    if map_ndim == 2:
+        return amp_maps
+
+    lead_ndim = map_ndim - 2
+    if map_index is None:
+        map_index = (0,) * lead_ndim
+    map_index = tuple(int(i) for i in map_index)
+    if len(map_index) != lead_ndim:
+        raise ValueError(
+            f"map_index must have length {lead_ndim} for map_ndim={map_ndim}"
+        )
+    slicer = map_index + (slice(None), slice(None), slice(None))
+    return amp_maps[slicer]
+
+
+def _rank_components(amp_maps_hwk, is_log10=True):
+    flat = amp_maps_hwk.reshape(-1, amp_maps_hwk.shape[-1])
+    if is_log10:
+        with np.errstate(over="ignore", invalid="ignore"):
+            lin = np.power(10.0, flat)
+        lin = np.nan_to_num(lin, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.mean(lin, axis=0)
+    flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
+    flat = np.clip(flat, 0.0, None)
+    return np.mean(flat, axis=0)
+
+
+def _resolve_amp_limits(vals, percentile):
+    if vals.size == 0:
+        return 0.0, 1.0
+
+    lo, hi = float(percentile[0]), float(percentile[1])
+    if lo >= hi:
+        vmin, vmax = float(np.min(vals)), float(np.max(vals))
+    else:
+        vmin, vmax = np.percentile(vals, [lo, hi]).astype(float)
+
+    if not np.isfinite(vmin):
+        vmin = 0.0
+    if not np.isfinite(vmax):
+        vmax = 1.0
+    if vmax <= vmin:
+        pad = max(1e-12, 0.05 * max(abs(vmin), 1.0))
+        vmin -= pad
+        vmax += pad
+    return float(vmin), float(vmax)
+
+
+def plot_amp_map(
+    amp_map,
+    name="",
+    *,
+    filename="amp_map.png",
+    cmap="viridis",
+    percentile=(1, 99),
+    vmin=None,
+    vmax=None,
+    origin="lower",
+    colorbar=True,
+    title=None,
+    save=False,
+    show=False,
+):
+    """Plot a single amplitude map."""
+    img = _as_numpy(amp_map)
+    if img.ndim == 1:
+        img = img[np.newaxis, :]
+    elif img.ndim != 2:
+        raise ValueError("amp_map must be a 1D or 2D array")
+
+    vals = img[np.isfinite(img)]
+    auto_vmin, auto_vmax = _resolve_amp_limits(vals, percentile)
+
+    if vmin is None:
+        vmin = auto_vmin
+    if vmax is None:
+        vmax = auto_vmax
+
+    fig, ax = plt.subplots(figsize=(4.0, 4.0))
+    aspect = "auto" if 1 in img.shape else None
+    im = ax.imshow(
+        img,
+        cmap=cmap,
+        origin=origin,
+        vmin=vmin,
+        vmax=vmax,
+        aspect=aspect,
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(title if title is not None else _format_elem_label(str(name)))
+    if colorbar:
+        fig.colorbar(im, ax=ax, shrink=0.85)
+    plt.tight_layout()
+    if save:
+        plt.savefig(filename)
+    elif show:
+        plt.show()
+    plt.close()
+    return fig, ax
+
+
+def plot_amp_maps_grid(
+    amp_maps,
+    amp_names,
+    *,
+    target_elems=None,
+    n_elem=12,
+    reverse=True,
+    map_index=None,
+    is_log10=True,
+    display="auto",
+    eps=1e-12,
+    n_cols=4,
+    cmap="viridis",
+    percentile=(1, 99),
+    origin="lower",
+    colorbar=False,
+    filename="amp_maps.png",
+    save=False,
+    show=False,
+):
+    """Plot a grid of 2D amplitude maps.
+
+    Args:
+        amp_maps: Array shaped (*map_shape, n_components).
+        amp_names: Component names aligned with last axis of amp_maps.
+        target_elems: Optional list of names to plot (subset of amp_names).
+        n_elem: If target_elems is None, plot the top-n components by mean amplitude.
+        map_index: Indices for leading map dims when map_shape has >2 dims.
+        is_log10: Whether amp_maps are log10(A). Used for ranking and display conversions.
+        display: "auto" | "log10" | "linear". "auto" selects "log10" when is_log10 else "linear".
+    """
+    amp_names = list(amp_names)
+    view = _select_map_view(amp_maps, map_index=map_index)
+    if view.ndim != 3:
+        raise ValueError("Internal error: expected (H, W, K) map view")
+    if view.shape[-1] != len(amp_names):
+        raise ValueError("amp_names length must match amp_maps last dimension")
+
+    display = str(display).lower()
+    if display == "auto":
+        display = "log10" if is_log10 else "linear"
+    if display not in ("log10", "linear"):
+        raise ValueError('display must be "auto", "log10", or "linear"')
+
+    if target_elems is None:
+        scores = _rank_components(view, is_log10=is_log10)
+        order = np.argsort(scores)
+        if reverse:
+            order = order[::-1]
+        if n_elem is not None:
+            order = order[: int(n_elem)]
+        sel_indices = list(order.tolist())
+    else:
+        desired = list(target_elems)
+        name_to_idx = {n: i for i, n in enumerate(amp_names)}
+        sel_indices = [name_to_idx[n] for n in desired if n in name_to_idx]
+
+    if not sel_indices:
+        raise ValueError("No components selected for plotting")
+
+    n_cols = max(1, int(n_cols))
+    n_rows = int(np.ceil(len(sel_indices) / n_cols))
+    fig_w = 3.2 * n_cols
+    fig_h = 3.2 * n_rows
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
+
+    for ax in axes.ravel():
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    for j, comp_idx in enumerate(sel_indices):
+        ax = axes[j // n_cols][j % n_cols]
+        img = view[..., comp_idx]
+
+        if display == "linear":
+            if is_log10:
+                with np.errstate(over="ignore", invalid="ignore"):
+                    img = np.power(10.0, img)
+            img = np.nan_to_num(img, nan=0.0, posinf=0.0, neginf=0.0)
+            img = np.clip(img, 0.0, None)
+        else:
+            if not is_log10:
+                img = np.log10(np.clip(img, eps, None))
+
+        vals = img[np.isfinite(img)]
+        vmin, vmax = _resolve_amp_limits(vals, percentile)
+
+        aspect = "auto" if 1 in img.shape else None
+        im = ax.imshow(
+            img,
+            cmap=cmap,
+            origin=origin,
+            vmin=vmin,
+            vmax=vmax,
+            aspect=aspect,
+        )
+        name = amp_names[comp_idx]
+        ax.set_title(_format_elem_label(str(name)))
+        if colorbar:
+            fig.colorbar(im, ax=ax, shrink=0.85)
+
+    for k in range(len(sel_indices), n_rows * n_cols):
+        axes[k // n_cols][k % n_cols].axis("off")
+
+    plt.tight_layout()
+    if save:
+        plt.savefig(filename)
+    elif show:
+        plt.show()
+    plt.close()
+    return fig, axes
