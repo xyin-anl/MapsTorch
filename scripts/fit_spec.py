@@ -4,6 +4,7 @@ import argparse
 import warnings
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 from mapstorch.plot import (
@@ -17,11 +18,13 @@ from mapstorch.plot import (
 from mapstorch.io import (
     parse_override_params_file,
     read_dataset,
+    resolve_energy_range,
     write_override_params_file,
 )
 from mapstorch.default import (
     default_elem_info,
     default_param_vals,
+    default_fitting_elems,
     default_fitting_params,
     default_energy_consts,
 )
@@ -79,23 +82,21 @@ def main(args):
     )
     int_spec_og = dataset_dict["int_spec"]
     elems = dataset_dict["elems"]
-    int_spec = int_spec_og[energy_range[0] : energy_range[1] + 1]
+    energy_axis = None
+    with h5py.File(dataset, "r") as h5:
+        for key in ("MAPS/energy", "MAPS/Spectra/Energy"):
+            if key in h5:
+                energy_axis = h5[key][:].astype(np.float32)
+                break
 
     # Update default parameter values
     param_default_vals = copy(default_param_vals)
-    heuristic_updates = (
-        estimate_and_update_params(
-            int_spec_og, energy_range, coherent_sct_energy, param_default_vals
-        )
-        if heuristics_enabled
-        else {}
-    )
-    param_default_vals.update(heuristic_updates)
 
     # Determine fitting configuration
     elements_to_fit = elems
     init_param_vals = param_default_vals
     e_consts = default_energy_consts
+    override_params = None
 
     if args.override_params_file:
         override_params = parse_override_params_file(args.override_params_file)
@@ -116,6 +117,27 @@ def main(args):
         if verbose:
             print(f"Detector material: {detector_material}")
             print(f"Escape factor: {escape_factor}")
+
+    energy_range = resolve_energy_range(
+        energy_range,
+        n_channels=int(int_spec_og.size),
+        energy_values=energy_axis,
+        override_params=override_params,
+    )
+    int_spec = int_spec_og[energy_range[0] : energy_range[1] + 1]
+
+    heuristic_updates = (
+        estimate_and_update_params(
+            int_spec_og, energy_range, coherent_sct_energy, param_default_vals
+        )
+        if heuristics_enabled
+        else {}
+    )
+    param_default_vals.update(heuristic_updates)
+    if init_param_vals is param_default_vals:
+        init_param_vals = param_default_vals
+    if verbose:
+        print(f"Energy range: {energy_range}")
 
     # Fit the spectrum using specified parameters
     fitted_tensors, fitted_spec, fitted_bkg, _ = fit_spec(
@@ -150,12 +172,19 @@ def main(args):
         # Extract parameter values from fitted_tensors
         param_values = {
             param: fitted_tensors[param].item()
-            for param in default_fitting_params
+            for param in default_param_vals
             if param in fitted_tensors
         }
 
         # Get elements list
         elements_to_save = [k for k in amps.keys()]
+        invalid = [e for e in elements_to_save if e not in default_fitting_elems]
+        if invalid:
+            print(
+                "Warning: dropping unsupported elements from override output: "
+                + ", ".join(invalid)
+            )
+        elements_to_save = [e for e in elements_to_save if e in default_fitting_elems]
 
         # Save to file
         output_file = params_output_path or "maps_fit_parameters_override_mapstorch.txt"
@@ -273,8 +302,8 @@ if __name__ == "__main__":
         "--energy_range",
         type=int,
         nargs=2,
-        default=[50, 1450],
-        help="Energy range of interest for analysis",
+        default=None,
+        help="Energy range of interest for analysis. If omitted, use override MIN/MAX energies when available.",
     )
     parser.add_argument(
         "--init_amp", type=bool, default=True, help="Flag to initialize amplitude"

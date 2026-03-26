@@ -18,7 +18,11 @@ from mapstorch.default import (
     default_fitting_params,
     default_param_vals,
 )
-from mapstorch.io import parse_override_params_file, write_override_params_file
+from mapstorch.io import (
+    parse_override_params_file,
+    resolve_energy_range,
+    write_override_params_file,
+)
 from mapstorch.map import build_model_basis
 from mapstorch.opt import fit_spec
 from mapstorch.plot import (
@@ -323,6 +327,8 @@ def _solve_mca_amplitudes_h5(
                             params_device["FWHM_OFFSET"],
                             params_device["FWHM_FANOPRIME"],
                             device=device_t,
+                            use_single_log=params_device["SNIP_USE_SINGLE_LOG"],
+                            use_fwhm_width=params_device["SNIP_USE_FWHM_WIDTH"],
                         )
                     y = y - bkg
 
@@ -398,7 +404,7 @@ def main(args):
     elem_path = args.elem_path
 
     energy_dim = args.energy_dim
-    energy_range = (int(args.energy_range[0]), int(args.energy_range[1]))
+    energy_range = args.energy_range
     incident_energy = args.incident_energy
     verbose = bool(args.verbose)
 
@@ -457,10 +463,14 @@ def main(args):
         dset = h5[spec_vol_key]
         energy_dim_resolved = _coerce_energy_dim(int(energy_dim), int(dset.ndim))
         n_ch = int(dset.shape[energy_dim_resolved])
-        if energy_range[0] < 0 or energy_range[1] >= n_ch:
-            raise ValueError(
-                f"energy_range={energy_range} is out of bounds for n_channels={n_ch}"
-            )
+        energy_key = _resolve_h5_key(
+            h5,
+            None,
+            ["MAPS/energy", "MAPS/Spectra/Energy"],
+            required=False,
+            label="energy axis",
+        )
+        energy_axis = None if energy_key is None else h5[energy_key][:].astype(np.float32)
 
         if verbose:
             print(f"Spectra volume key: {spec_vol_key}")
@@ -499,6 +509,15 @@ def main(args):
 
     if skip_global_fit and not override_params:
         raise ValueError("--skip_global_fit requires --override_params_file")
+
+    energy_range = resolve_energy_range(
+        energy_range,
+        n_channels=n_ch,
+        energy_values=energy_axis,
+        override_params=override_params,
+    )
+    if verbose:
+        print(f"Energy range: {energy_range}")
 
     params_init = _prepare_numeric_params(
         override_params,
@@ -607,11 +626,13 @@ def main(args):
         if fitted_tensors is not None:
             param_values = {
                 p: float(fitted_tensors[p].item())
-                for p in default_fitting_params
+                for p in default_param_vals
                 if p in fitted_tensors
             }
         else:
-            param_values = {p: float(params_init[p]) for p in default_fitting_params if p in params_init}
+            param_values = {
+                p: float(params_init[p]) for p in default_param_vals if p in params_init
+            }
 
         params_path = Path(args.params_output_path) if args.params_output_path else (output_dir / f"{output_prefix}_maps_fit_parameters_override_mapstorch.txt")
         elements_to_save = [e for e in amp_names if e not in set(elements_with_pileup)]
@@ -824,8 +845,8 @@ if __name__ == "__main__":
         "--energy_range",
         type=int,
         nargs=2,
-        default=[50, 1450],
-        help="Channel range (start stop) inclusive.",
+        default=None,
+        help="Channel range (start stop) inclusive. If omitted, use override MIN/MAX energies when available.",
     )
     parser.add_argument(
         "--device_selection",

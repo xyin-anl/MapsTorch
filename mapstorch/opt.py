@@ -815,6 +815,8 @@ def solve_mca_amplitudes(
                     params_device["FWHM_OFFSET"],
                     params_device["FWHM_FANOPRIME"],
                     device=device,
+                    use_single_log=params_device["SNIP_USE_SINGLE_LOG"],
+                    use_fwhm_width=params_device["SNIP_USE_FWHM_WIDTH"],
                 )
             y = y - bkg
 
@@ -991,6 +993,8 @@ def _calculate_loss(
             tensors["FWHM_OFFSET"],
             tensors["FWHM_FANOPRIME"],
             device=int_spec_tensor.device,
+            use_single_log=tensors["SNIP_USE_SINGLE_LOG"],
+            use_fwhm_width=tensors["SNIP_USE_FWHM_WIDTH"],
         )
         if use_snip
         else torch.zeros_like(int_spec_tensor, device=int_spec_tensor.device)

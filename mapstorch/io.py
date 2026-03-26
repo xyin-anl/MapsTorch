@@ -120,6 +120,52 @@ def read_dataset(
     return {"spec_vol": spec_vol, "elems": fit_elems, "int_spec": int_spec}
 
 
+def resolve_energy_range(
+    explicit_range,
+    *,
+    n_channels,
+    energy_values=None,
+    override_params=None,
+    default_range=(50, 1450),
+):
+    """Resolve an inclusive channel range from CLI args and optional override params."""
+    n_channels = int(n_channels)
+    if n_channels <= 0:
+        raise ValueError("n_channels must be > 0")
+
+    if explicit_range is not None:
+        start, stop = int(explicit_range[0]), int(explicit_range[1])
+    elif (
+        override_params
+        and "MIN_ENERGY_TO_FIT" in override_params
+        and "MAX_ENERGY_TO_FIT" in override_params
+    ):
+        min_energy = float(override_params["MIN_ENERGY_TO_FIT"])
+        max_energy = float(override_params["MAX_ENERGY_TO_FIT"])
+        if energy_values is not None:
+            ev = np.asarray(energy_values, dtype=float).reshape(-1)
+            if ev.size != n_channels:
+                raise ValueError(
+                    f"energy_values has size {ev.size}, expected {n_channels}"
+                )
+            start = int(np.searchsorted(ev, min_energy, side="left"))
+            stop = int(np.searchsorted(ev, max_energy, side="right") - 1)
+        else:
+            start = int(default_range[0])
+            stop = int(default_range[1])
+    else:
+        start = int(default_range[0])
+        stop = int(default_range[1])
+
+    start = max(0, min(start, n_channels - 1))
+    stop = max(0, min(stop, n_channels - 1))
+    if stop < start:
+        raise ValueError(
+            f"Resolved energy_range=({start}, {stop}) is invalid for n_channels={n_channels}"
+        )
+    return start, stop
+
+
 def create_dataset(
     spec_vol,
     energy_dim,
@@ -354,6 +400,18 @@ def write_override_params_file(
             "    snip width is the width used for estimating background. 0.5 is typically a good start \n"
         )
         f.write(f"SNIP_WIDTH: {params.get('SNIP_WIDTH', 0.5)}\n")
+        f.write(
+            "    set SNIP_USE_SINGLE_LOG to 1 to use a single log transform; 0 keeps the default double-log SNIP transform\n"
+        )
+        f.write(
+            f"SNIP_USE_SINGLE_LOG: {int(bool(params.get('SNIP_USE_SINGLE_LOG', 0)))}\n"
+        )
+        f.write(
+            "    set SNIP_USE_FWHM_WIDTH to 1 to use the MapsTorch detector-resolution SNIP width; 0 keeps the default XRF-Maps-compatible width\n"
+        )
+        f.write(
+            f"SNIP_USE_FWHM_WIDTH: {int(bool(params.get('SNIP_USE_FWHM_WIDTH', 0)))}\n"
+        )
         f.write(
             "    set FIT_SNIP_WIDTH to 1 to fit the width of the snipping for background estimate, set to 0 not to. Only use if you know what it is doing!\n"
         )

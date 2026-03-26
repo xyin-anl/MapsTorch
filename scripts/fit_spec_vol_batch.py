@@ -18,7 +18,7 @@ from mapstorch.batchfit import (
 )
 from mapstorch.constant import read_constants
 from mapstorch.default import default_elem_info, default_fitting_params
-from mapstorch.io import parse_override_params_file
+from mapstorch.io import parse_override_params_file, resolve_energy_range
 from mapstorch.opt import fit_spec_batch
 
 
@@ -82,13 +82,20 @@ def main(args):
         dset = h5[spec_vol_key]
         energy_dim = coerce_energy_dim(int(args.energy_dim), int(dset.ndim))
         n_ch = int(dset.shape[energy_dim])
-        energy_range = (int(args.energy_range[0]), int(args.energy_range[1]))
-        if energy_range[1] < energy_range[0]:
-            raise ValueError("energy_range stop must be >= start")
-        if energy_range[0] < 0 or energy_range[1] >= n_ch:
-            raise ValueError(
-                f"energy_range={energy_range} is out of bounds for n_channels={n_ch}"
-            )
+        energy_key = resolve_h5_key(
+            h5,
+            None,
+            ["MAPS/energy", "MAPS/Spectra/Energy"],
+            required=False,
+            label="energy axis",
+        )
+        energy_axis = None if energy_key is None else h5[energy_key][:].astype(np.float32)
+        energy_range = resolve_energy_range(
+            args.energy_range,
+            n_channels=n_ch,
+            energy_values=energy_axis,
+            override_params=override,
+        )
 
         map_dims = [i for i in range(dset.ndim) if i != energy_dim]
         map_shape = tuple(int(dset.shape[i]) for i in map_dims)
@@ -337,8 +344,8 @@ if __name__ == "__main__":
         "--energy_range",
         type=int,
         nargs=2,
-        default=[50, 1450],
-        help="Channel range (start stop), inclusive",
+        default=None,
+        help="Channel range (start stop), inclusive. If omitted, use override MIN/MAX energies when available.",
     )
     parser.add_argument(
         "--tile_shape",

@@ -50,6 +50,15 @@ import torch.nn.functional as F
 from mapstorch.constant import M_SQRT2
 
 
+def _resolve_bool_option(value):
+    if isinstance(value, torch.Tensor):
+        value = value.detach()
+        if value.numel() != 1:
+            value = value.reshape(-1)[0]
+        return bool(value.item() >= 0.5)
+    return bool(value)
+
+
 def snip_op(background, current_width, max_of_xmin, min_of_xmax, device):
     n_ch = background.shape[-1]
     range_tensor = torch.arange(n_ch, device=device, dtype=background.dtype).expand(
@@ -82,8 +91,12 @@ def snip_bkg(
     fwhm_fanoprime,
     boxcar_size=5,
     device="cpu",
+    use_single_log=False,
+    use_fwhm_width=False,
 ):
     spec = spec.to(device)
+    use_single_log = _resolve_bool_option(use_single_log)
+    use_fwhm_width = _resolve_bool_option(use_fwhm_width)
 
     n_ch = spec.shape[-1]
     local_idx = torch.arange(n_ch, device=device, dtype=spec.dtype)
@@ -91,7 +104,11 @@ def snip_bkg(
     global_idx = local_idx + ch0
 
     energy = e_offset + (e_slope * global_idx) + (e_quad * (global_idx**2))
-    sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * 2.96 * fwhm_fanoprime
+    if use_fwhm_width:
+        sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * 2.96 * fwhm_fanoprime
+    else:
+        # Match the legacy XRF-Maps SNIP window scaling used in MAPS.
+        sigma_sq = (e_offset / 2.3548) ** 2 + energy * 3.58 * e_slope
     sigma_sq = torch.clamp(sigma_sq, min=0.0)
     # Clamp e_slope to avoid division by zero or very small values (can happen during
     # aggressive optimization like LBFGS). Also handle NaN and clamp to valid range.
@@ -107,8 +124,12 @@ def snip_bkg(
 
     background = background.view_as(spec)
 
-    # Log-compress once; avoids unnecessary double-log distortion
-    background = torch.log1p(background)
+    # Match historical MAPS SNIP behavior by default, with single-log available
+    # as an opt-in for users who prefer the newer transform.
+    if use_single_log:
+        background = torch.log1p(background)
+    else:
+        background = torch.log1p(torch.log1p(background))
     background = torch.nan_to_num(background, posinf=0.0, neginf=0.0)
     max_of_xmin = 0
     min_of_xmax = n_ch - 1
@@ -121,5 +142,8 @@ def snip_bkg(
             background, current_width, max_of_xmin, min_of_xmax, device=device
         )
         current_width = current_width / M_SQRT2
-    background = torch.expm1(background)
+    if use_single_log:
+        background = torch.expm1(background)
+    else:
+        background = torch.expm1(torch.expm1(background))
     return torch.nan_to_num(background, nan=0.0, posinf=0.0, neginf=0.0)

@@ -93,6 +93,8 @@ def _compute_background(
         tensors["FWHM_OFFSET"],
         tensors["FWHM_FANOPRIME"],
         device=device,
+        use_single_log=tensors["SNIP_USE_SINGLE_LOG"],
+        use_fwhm_width=tensors["SNIP_USE_FWHM_WIDTH"],
     )
 
 

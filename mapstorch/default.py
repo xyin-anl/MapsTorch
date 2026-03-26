@@ -95,6 +95,8 @@ default_param_vals = {
     "GAMMA_LINEAR": 0.0,
     "MIN_ENERGY_TO_FIT": 1.0,
     "SNIP_WIDTH": 0.5,
+    "SNIP_USE_SINGLE_LOG": 0.0,
+    "SNIP_USE_FWHM_WIDTH": 0.0,
 }
 
 # Dictionary of learning rates for each fitting parameter
@@ -128,6 +130,8 @@ param_name_map = {
     "COMPTON_STEP": "COMPTON_F_STEP",
     "SI_ESCAPE_ENABLE": "SI_ESCAPE",
     "GE_ESCAPE_ENABLE": "GE_ESCAPE",
+    "SNIP_SINGLE_LOG": "SNIP_USE_SINGLE_LOG",
+    "SNIP_FWHM_WIDTH": "SNIP_USE_FWHM_WIDTH",
 }
 
 # Default fitting elements
