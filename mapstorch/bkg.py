@@ -93,19 +93,30 @@ def snip_bkg(
     device="cpu",
     use_single_log=False,
     use_fwhm_width=False,
+    use_full_spectrum=False,
+    return_full=False,
+    fwhm_fano_coeff=3.58,
 ):
     spec = spec.to(device)
     use_single_log = _resolve_bool_option(use_single_log)
     use_fwhm_width = _resolve_bool_option(use_fwhm_width)
+    use_full_spectrum = _resolve_bool_option(use_full_spectrum)
 
     n_ch = spec.shape[-1]
     local_idx = torch.arange(n_ch, device=device, dtype=spec.dtype)
-    ch0 = er[0]
-    global_idx = local_idx + ch0
+    ch0, ch1 = int(er[0]), int(er[1])
+    if use_full_spectrum:
+        global_idx = local_idx
+        max_of_xmin = max(ch0, 0)
+        min_of_xmax = min(ch1, n_ch - 1)
+    else:
+        global_idx = local_idx + ch0
+        max_of_xmin = 0
+        min_of_xmax = n_ch - 1
 
     energy = e_offset + (e_slope * global_idx) + (e_quad * (global_idx**2))
     if use_fwhm_width:
-        sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * 2.96 * fwhm_fanoprime
+        sigma_sq = (fwhm_offset / 2.3548) ** 2 + energy * fwhm_fano_coeff * fwhm_fanoprime
     else:
         # Match the legacy XRF-Maps SNIP window scaling used in MAPS.
         sigma_sq = (e_offset / 2.3548) ** 2 + energy * 3.58 * e_slope
@@ -131,8 +142,6 @@ def snip_bkg(
     else:
         background = torch.log1p(torch.log1p(background))
     background = torch.nan_to_num(background, posinf=0.0, neginf=0.0)
-    max_of_xmin = 0
-    min_of_xmax = n_ch - 1
     for _ in range(2):
         background = snip_op(
             background, current_width, max_of_xmin, min_of_xmax, device=device
@@ -146,4 +155,7 @@ def snip_bkg(
         background = torch.expm1(background)
     else:
         background = torch.expm1(torch.expm1(background))
-    return torch.nan_to_num(background, nan=0.0, posinf=0.0, neginf=0.0)
+    background = torch.nan_to_num(background, nan=0.0, posinf=0.0, neginf=0.0)
+    if use_full_spectrum and not return_full:
+        background = background[..., ch0 : ch1 + 1]
+    return background

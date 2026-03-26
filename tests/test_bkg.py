@@ -48,6 +48,46 @@ class SnipBackgroundTests(unittest.TestCase):
         self.assertLess(default_bkg[160].item(), single_log_bkg[160].item())
         self.assertGreater(fwhm_width_bkg[160].item(), default_bkg[160].item())
 
+    def test_full_spectrum_mode_matches_full_background_slice(self):
+        n_ch = 256
+        x = torch.arange(n_ch, dtype=torch.float64)
+        spec = (
+            30.0
+            + 0.04 * x
+            + 700.0 * torch.exp(-0.5 * ((x - 48.0) / 11.0) ** 2)
+            + 500.0 * torch.exp(-0.5 * ((x - 205.0) / 17.0) ** 2)
+        )
+        er = (60, 180)
+        kwargs = {
+            "er": er,
+            "e_offset": torch.tensor(0.0, dtype=torch.float64),
+            "e_slope": torch.tensor(0.01, dtype=torch.float64),
+            "e_quad": torch.tensor(0.0, dtype=torch.float64),
+            "snip_width": torch.tensor(0.5, dtype=torch.float64),
+            "fwhm_offset": torch.tensor(0.08, dtype=torch.float64),
+            "fwhm_fanoprime": torch.tensor(1.8e-4, dtype=torch.float64),
+            "device": "cpu",
+        }
+
+        roi_bkg = snip_bkg(spec=spec[er[0] : er[1] + 1], **kwargs)
+        full_bkg = snip_bkg(
+            spec=spec,
+            use_full_spectrum=True,
+            return_full=True,
+            **kwargs,
+        )
+        full_slice_bkg = snip_bkg(
+            spec=spec,
+            use_full_spectrum=True,
+            **kwargs,
+        )
+
+        torch.testing.assert_close(full_bkg[er[0] : er[1] + 1], full_slice_bkg)
+        self.assertGreater(
+            torch.max(torch.abs(full_slice_bkg - roi_bkg)).item(),
+            1e-3,
+        )
+
 
 class OverrideParamsTests(unittest.TestCase):
     def test_snip_options_round_trip_through_override_file(self):
@@ -55,17 +95,26 @@ class OverrideParamsTests(unittest.TestCase):
             override_path = Path(tmpdir) / "override.txt"
             write_override_params_file(
                 str(override_path),
-                param_values={"SNIP_SINGLE_LOG": 1, "SNIP_FWHM_WIDTH": 1},
+                param_values={
+                    "SNIP_SINGLE_LOG": 1,
+                    "SNIP_FWHM_WIDTH": 1,
+                    "SNIP_FULL_SPECTRUM": 0,
+                    "FWHM_FANO_COEFF": 3.58,
+                },
                 elements=["Fe"],
             )
 
             contents = override_path.read_text(encoding="utf-8")
             self.assertIn("SNIP_USE_SINGLE_LOG: 1", contents)
             self.assertIn("SNIP_USE_FWHM_WIDTH: 1", contents)
+            self.assertIn("SNIP_USE_FULL_SPECTRUM: 0", contents)
+            self.assertIn("FWHM_FANO_COEFF: 3.58", contents)
 
             parsed = parse_override_params_file(str(override_path))
             self.assertEqual(parsed["SNIP_USE_SINGLE_LOG"], 1.0)
             self.assertEqual(parsed["SNIP_USE_FWHM_WIDTH"], 1.0)
+            self.assertEqual(parsed["SNIP_USE_FULL_SPECTRUM"], 0.0)
+            self.assertEqual(parsed["FWHM_FANO_COEFF"], 3.58)
 
 
 class EnergyRangeTests(unittest.TestCase):

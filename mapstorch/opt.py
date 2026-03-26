@@ -69,6 +69,21 @@ from mapstorch.default import (
 )
 
 
+def _resolve_bool_param(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, torch.Tensor):
+        value = value.detach()
+        if value.numel() != 1:
+            value = value.reshape(-1)[0]
+        return bool(value.item() >= 0.5)
+    return bool(value)
+
+
+def _ordered_unique(items):
+    return list(dict.fromkeys(items))
+
+
 def init_elem_amps(
     elem,
     spec,
@@ -345,12 +360,14 @@ def fit_spec(
 
     elements = [
         elem
-        for elem in set(
+        for elem in _ordered_unique(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
         if (elem in e_consts) or (elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"])
     ]
-    params = [param for param in set(fitting_params) if param in default_fitting_params]
+    params = [
+        param for param in _ordered_unique(fitting_params) if param in default_fitting_params
+    ]
 
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
@@ -371,16 +388,17 @@ def fit_spec(
     )
     # Check if int_spec is already a tensor
     if isinstance(int_spec, torch.Tensor):
-        int_spec_tensor = int_spec[energy_range[0] : energy_range[1] + 1]
+        int_spec_full_tensor = int_spec.to(device=device, dtype=torch.float32)
+        int_spec_tensor = int_spec_full_tensor[energy_range[0] : energy_range[1] + 1]
         # Ensure it's on the correct device and dtype
-        int_spec_tensor = int_spec_tensor.to(device=device, dtype=torch.float32)
     else:
-        int_spec_tensor = torch.tensor(
-            int_spec[energy_range[0] : energy_range[1] + 1],
+        int_spec_full_tensor = torch.tensor(
+            int_spec,
             requires_grad=False,
             dtype=torch.float32,
             device=device,
         )
+        int_spec_tensor = int_spec_full_tensor[energy_range[0] : energy_range[1] + 1]
 
     if loss_params is None:
         loss_params = {}
@@ -411,6 +429,7 @@ def fit_spec(
                 loss_val, spec_fit, bkg = _calculate_loss(
                     tensors,
                     int_spec_tensor,
+                    int_spec_full_tensor,
                     energy_range,
                     elements,
                     use_snip,
@@ -432,6 +451,7 @@ def fit_spec(
                             perturbed_loss, _, _ = _calculate_loss(
                                 tensors,
                                 int_spec_tensor,
+                                int_spec_full_tensor,
                                 energy_range,
                                 elements,
                                 use_snip,
@@ -453,6 +473,7 @@ def fit_spec(
             loss_val, spec_fit, bkg = _calculate_loss(
                 tensors,
                 int_spec_tensor,
+                int_spec_full_tensor,
                 energy_range,
                 elements,
                 use_snip,
@@ -484,6 +505,7 @@ def fit_spec(
             _, spec_fit, bkg = _calculate_loss(
                 tensors,
                 int_spec_tensor,
+                int_spec_full_tensor,
                 energy_range,
                 elements,
                 use_snip,
@@ -566,12 +588,14 @@ def fit_spec_batch(
 
     elements = [
         elem
-        for elem in set(
+        for elem in _ordered_unique(
             elements_to_fit + ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
         )
         if (elem in e_consts) or (elem in ["COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"])
     ]
-    params = [param for param in set(fitting_params) if param in default_fitting_params]
+    params = [
+        param for param in _ordered_unique(fitting_params) if param in default_fitting_params
+    ]
 
     tensors, opt_configs = create_batched_tensors(
         elems_to_fit=elements,
@@ -625,6 +649,7 @@ def fit_spec_batch(
         loss_val, spec_fit, bkg = _calculate_loss(
             tensors,
             spec_roi,
+            spec,
             energy_range,
             elements,
             use_snip,
@@ -656,6 +681,7 @@ def fit_spec_batch(
             _, spec_fit, bkg = _calculate_loss(
                 tensors,
                 spec_roi,
+                spec,
                 energy_range,
                 elements,
                 use_snip,
@@ -756,12 +782,11 @@ def solve_mca_amplitudes(
             f"energy_range={energy_range} is out of bounds for n_channels={mca.shape[-1]}"
         )
 
-    mca_roi = mca[..., ch0 : ch1 + 1]
-    map_shape = mca_roi.shape[:-1]
+    map_shape = mca.shape[:-1]
     n_spec = int(np.prod(map_shape)) if map_shape else 1
-    n_ch = mca_roi.shape[-1]
-
-    spectra = mca_roi.reshape(n_spec, n_ch)
+    spectra_full = mca.reshape(n_spec, mca.shape[-1])
+    spectra = spectra_full[:, ch0 : ch1 + 1]
+    n_ch = spectra.shape[-1]
 
     basis, basis_names = build_model_basis(
         params_device,
@@ -776,6 +801,9 @@ def solve_mca_amplitudes(
     )
     basis = basis.to(device=device, dtype=torch.float32)
     n_comp = basis.shape[0]
+    use_full_spectrum_snip = _resolve_bool_param(
+        params_device.get("SNIP_USE_FULL_SPECTRUM", 1.0), default=True
+    )
 
     if amp_method not in ("ridge", "lstsq", "nnls_pgd"):
         raise ValueError('amp_method must be "ridge", "lstsq", or "nnls_pgd"')
@@ -806,7 +834,7 @@ def solve_mca_amplitudes(
         if use_snip:
             with torch.no_grad():
                 bkg = snip_bkg(
-                    y,
+                    spectra_full[start:stop] if use_full_spectrum_snip else y,
                     energy_range,
                     params_device["ENERGY_OFFSET"],
                     params_device["ENERGY_SLOPE"],
@@ -817,6 +845,10 @@ def solve_mca_amplitudes(
                     device=device,
                     use_single_log=params_device["SNIP_USE_SINGLE_LOG"],
                     use_fwhm_width=params_device["SNIP_USE_FWHM_WIDTH"],
+                    use_full_spectrum=use_full_spectrum_snip,
+                    fwhm_fano_coeff=params_device.get(
+                        "FWHM_FANO_COEFF", default_param_vals["FWHM_FANO_COEFF"]
+                    ),
                 )
             y = y - bkg
 
@@ -970,6 +1002,7 @@ def fit_mca_arr(
 def _calculate_loss(
     tensors,
     int_spec_tensor,
+    full_spec_tensor,
     energy_range,
     elements,
     use_snip,
@@ -982,9 +1015,12 @@ def _calculate_loss(
     detector_type,
     escape_factor,
 ):
+    use_full_spectrum_snip = _resolve_bool_param(
+        tensors.get("SNIP_USE_FULL_SPECTRUM", 1.0), default=True
+    )
     bkg = (
         snip_bkg(
-            int_spec_tensor,
+            full_spec_tensor if use_full_spectrum_snip else int_spec_tensor,
             energy_range,
             tensors["ENERGY_OFFSET"],
             tensors["ENERGY_SLOPE"],
@@ -995,6 +1031,10 @@ def _calculate_loss(
             device=int_spec_tensor.device,
             use_single_log=tensors["SNIP_USE_SINGLE_LOG"],
             use_fwhm_width=tensors["SNIP_USE_FWHM_WIDTH"],
+            use_full_spectrum=use_full_spectrum_snip,
+            fwhm_fano_coeff=tensors.get(
+                "FWHM_FANO_COEFF", default_param_vals["FWHM_FANO_COEFF"]
+            ),
         )
         if use_snip
         else torch.zeros_like(int_spec_tensor, device=int_spec_tensor.device)
