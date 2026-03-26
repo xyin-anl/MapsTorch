@@ -16,7 +16,7 @@ import math
 import torch
 import torch.nn.functional as F
 
-from mapstorch.default import default_energy_consts, default_elem_info
+from mapstorch.default import default_energy_consts, default_elem_info, default_param_vals
 from mapstorch.map import _binding_energy_mask
 
 ShapeMetric = Literal["w1", "mmd_rbf"]
@@ -231,6 +231,13 @@ def build_roi_weights(
 
     fwhm_offset = _as_channel_broadcast(params["FWHM_OFFSET"], batch_shape=batch_shape)
     fwhm_fano = _as_channel_broadcast(params["FWHM_FANOPRIME"], batch_shape=batch_shape)
+    fwhm_fano_coeff = params.get(
+        "FWHM_FANO_COEFF",
+        torch.tensor(
+            default_param_vals["FWHM_FANO_COEFF"], device=device, dtype=dtype
+        ),
+    )
+    fwhm_fano_coeff = _as_channel_broadcast(fwhm_fano_coeff, batch_shape=batch_shape)
     coherent = params["COHERENT_SCT_ENERGY"]
     coherent_b = _as_channel_broadcast(coherent, batch_shape=batch_shape)
 
@@ -265,7 +272,10 @@ def build_roi_weights(
             if e_val <= 0.0 or ratio == 0.0:
                 continue
             sigma = torch.sqrt(
-                torch.clamp((fwhm_offset / 2.3548) ** 2 + (e_val * 2.96) * fwhm_fano, min=0.0)
+                torch.clamp(
+                    (fwhm_offset / 2.3548) ** 2 + (e_val * fwhm_fano_coeff) * fwhm_fano,
+                    min=0.0,
+                )
             )
             sigma = _as_channel_broadcast(sigma, batch_shape=batch_shape)
             e0 = torch.tensor(e_val, device=device, dtype=dtype)
@@ -280,7 +290,10 @@ def build_roi_weights(
     if include_scatter:
         # Elastic peak at the incident energy.
         sigma_el = torch.sqrt(
-            torch.clamp((fwhm_offset / 2.3548) ** 2 + coherent_b * 2.96 * fwhm_fano, min=0.0)
+            torch.clamp(
+                (fwhm_offset / 2.3548) ** 2 + coherent_b * fwhm_fano_coeff * fwhm_fano,
+                min=0.0,
+            )
         )
         _combine(_line_weight(coherent_b, sigma_el))
 
@@ -292,7 +305,10 @@ def build_roi_weights(
             + (coherent_b / 511.0) * (1.0 - torch.cos(angle_b * 2.0 * math.pi / 360.0))
         )
         sigma_c = torch.sqrt(
-            torch.clamp((fwhm_offset / 2.3548) ** 2 + compton_e * 2.96 * fwhm_fano, min=0.0)
+            torch.clamp(
+                (fwhm_offset / 2.3548) ** 2 + compton_e * fwhm_fano_coeff * fwhm_fano,
+                min=0.0,
+            )
         )
         _combine(_line_weight(compton_e, sigma_c))
 
@@ -346,6 +362,13 @@ def build_element_roi_masks(
 
     fwhm_offset = _as_channel_broadcast(params["FWHM_OFFSET"], batch_shape=batch_shape)
     fwhm_fano = _as_channel_broadcast(params["FWHM_FANOPRIME"], batch_shape=batch_shape)
+    fwhm_fano_coeff = params.get(
+        "FWHM_FANO_COEFF",
+        torch.tensor(
+            default_param_vals["FWHM_FANO_COEFF"], device=device, dtype=dtype
+        ),
+    )
+    fwhm_fano_coeff = _as_channel_broadcast(fwhm_fano_coeff, batch_shape=batch_shape)
     coherent = params["COHERENT_SCT_ENERGY"]
     coherent_b = _as_channel_broadcast(coherent, batch_shape=batch_shape)
 
@@ -368,7 +391,9 @@ def build_element_roi_masks(
                     continue
                 sigma = torch.sqrt(
                     torch.clamp(
-                        (fwhm_offset / 2.3548) ** 2 + (e_val * 2.96) * fwhm_fano, min=0.0
+                        (fwhm_offset / 2.3548) ** 2
+                        + (e_val * fwhm_fano_coeff) * fwhm_fano,
+                        min=0.0,
                     )
                 )
                 sigma = _as_channel_broadcast(sigma, batch_shape=batch_shape)
@@ -390,7 +415,10 @@ def build_element_roi_masks(
                 mask = torch.maximum(mask, m)
         elif include_scatter and elem == "COHERENT_SCT_AMPLITUDE":
             sigma_el = torch.sqrt(
-                torch.clamp((fwhm_offset / 2.3548) ** 2 + coherent_b * 2.96 * fwhm_fano, min=0.0)
+                torch.clamp(
+                    (fwhm_offset / 2.3548) ** 2 + coherent_b * fwhm_fano_coeff * fwhm_fano,
+                    min=0.0,
+                )
             )
             mask = _line_mask(coherent_b, torch.clamp(sigma_el, min=eps_t))
         elif include_scatter and elem == "COMPTON_AMPLITUDE":
@@ -401,7 +429,10 @@ def build_element_roi_masks(
                 + (coherent_b / 511.0) * (1.0 - torch.cos(angle_b * 2.0 * math.pi / 360.0))
             )
             sigma_c = torch.sqrt(
-                torch.clamp((fwhm_offset / 2.3548) ** 2 + compton_e * 2.96 * fwhm_fano, min=0.0)
+                torch.clamp(
+                    (fwhm_offset / 2.3548) ** 2 + compton_e * fwhm_fano_coeff * fwhm_fano,
+                    min=0.0,
+                )
             )
             mask = _line_mask(compton_e, torch.clamp(sigma_c, min=eps_t))
 

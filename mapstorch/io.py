@@ -352,6 +352,10 @@ def write_override_params_file(
         f.write(f"FWHM_OFFSET: {params.get('FWHM_OFFSET', 0.09721764)}\n")
         f.write("    energy dependence of the energy resolution\n")
         f.write(f"FWHM_FANOPRIME: {params.get('FWHM_FANOPRIME', 0.00022440446)}\n")
+        f.write(
+            "    coefficient multiplying FWHM_FANOPRIME in the detector-resolution term; 3.58 matches XRF-Maps\n"
+        )
+        f.write(f"FWHM_FANO_COEFF: {params.get('FWHM_FANO_COEFF', 3.58)}\n")
 
         # Coherent scattering parameters
         f.write("    incident energy\n")
@@ -411,6 +415,12 @@ def write_override_params_file(
         )
         f.write(
             f"SNIP_USE_FWHM_WIDTH: {int(bool(params.get('SNIP_USE_FWHM_WIDTH', 0)))}\n"
+        )
+        f.write(
+            "    set SNIP_USE_FULL_SPECTRUM to 1 to compute SNIP on the full spectrum and slice the fit ROI afterward, matching XRF-Maps\n"
+        )
+        f.write(
+            f"SNIP_USE_FULL_SPECTRUM: {int(bool(params.get('SNIP_USE_FULL_SPECTRUM', 1)))}\n"
         )
         f.write(
             "    set FIT_SNIP_WIDTH to 1 to fit the width of the snipping for background estimate, set to 0 not to. Only use if you know what it is doing!\n"

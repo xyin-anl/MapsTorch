@@ -80,6 +80,7 @@ default_param_vals = {
     "COMPTON_F_STEP": 0.0,
     "SI_ESCAPE": 0.0,
     "FWHM_FANOPRIME": 0.00017760999617166817,
+    "FWHM_FANO_COEFF": 3.58,
     "COMPTON_HI_GAMMA": 3.0,
     "ENERGY_OFFSET": -0.0020250400993973017,
     "KB_F_TAIL_OFFSET": 0.16684700548648834,
@@ -97,6 +98,7 @@ default_param_vals = {
     "SNIP_WIDTH": 0.5,
     "SNIP_USE_SINGLE_LOG": 0.0,
     "SNIP_USE_FWHM_WIDTH": 0.0,
+    "SNIP_USE_FULL_SPECTRUM": 1.0,
 }
 
 # Dictionary of learning rates for each fitting parameter
@@ -132,6 +134,7 @@ param_name_map = {
     "GE_ESCAPE_ENABLE": "GE_ESCAPE",
     "SNIP_SINGLE_LOG": "SNIP_USE_SINGLE_LOG",
     "SNIP_FWHM_WIDTH": "SNIP_USE_FWHM_WIDTH",
+    "SNIP_FULL_SPECTRUM": "SNIP_USE_FULL_SPECTRUM",
 }
 
 # Default fitting elements

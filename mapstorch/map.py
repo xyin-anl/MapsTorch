@@ -46,11 +46,18 @@ POSSIBILITY OF SUCH DAMAGE.
 ### Initial Author <2024>: Xiangyu Yin
 
 import torch
-from mapstorch.constant import M_PI, SQRT_2XPI, M_SQRT2
+from mapstorch.constant import (
+    M_PI,
+    SQRT_2XPI,
+    M_SQRT2,
+    binding_threshold_for_line,
+    parse_pileup_descriptor,
+)
 from mapstorch.default import (
     default_fitting_elems,
     default_energy_consts,
     default_elem_info,
+    default_param_vals,
 )
 
 
@@ -62,17 +69,39 @@ def step(gain, sigma, delta_energy, peak_E):
     return gain / 2.0 / peak_E * torch.erfc(delta_energy / (M_SQRT2 * sigma))
 
 
+def _positive_clamp(value, minimum):
+    if isinstance(value, torch.Tensor):
+        return torch.clamp(value, min=float(minimum))
+    return max(float(value), float(minimum))
+
+
+def _resolution_fano_coeff(params):
+    coeff = params.get("FWHM_FANO_COEFF", default_param_vals["FWHM_FANO_COEFF"])
+    if isinstance(coeff, torch.Tensor):
+        return torch.clamp(coeff, min=0.0)
+    return max(float(coeff), 0.0)
+
+
 def tail(gain, sigma, delta_energy, gamma):
+    sigma = _positive_clamp(sigma, 1e-6)
+    gamma = _positive_clamp(gamma, 0.1)
     val1 = torch.erfc(delta_energy / (M_SQRT2 * sigma) + (1.0 / (gamma * M_SQRT2)))
-    val2 = torch.exp(delta_energy / (gamma * sigma)) * val1
+    val2 = torch.exp(torch.clamp(delta_energy / (gamma * sigma), max=0.0)) * val1
     d_e = torch.where(delta_energy < 0, val2, val1)
-    return gain / 2.0 / gamma / sigma / torch.exp(-0.5 / gamma**2) * d_e
+    exp_term = 0.5 / gamma**2
+    if not isinstance(exp_term, torch.Tensor):
+        exp_term = torch.tensor(
+            exp_term, device=delta_energy.device, dtype=delta_energy.dtype
+        )
+    counts = gain * torch.exp(exp_term) / (2.0 * gamma * sigma) * d_e
+    return torch.nan_to_num(counts, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def elastic_peak(params, ev, gain):
+    fano_coeff = _resolution_fano_coeff(params)
     sigma = torch.sqrt(
         (params["FWHM_OFFSET"] / 2.3548) ** 2
-        + params["COHERENT_SCT_ENERGY"] * 2.96 * params["FWHM_FANOPRIME"]
+        + params["COHERENT_SCT_ENERGY"] * fano_coeff * params["FWHM_FANOPRIME"]
     )
     coherent = params["COHERENT_SCT_ENERGY"]
     amp = 10 ** params["COHERENT_SCT_AMPLITUDE"]
@@ -97,9 +126,10 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
         + (params["COHERENT_SCT_ENERGY"] / 511)
         * (1 - torch.cos(params["COMPTON_ANGLE"] * 2 * M_PI / 360.0))
     )
+    fano_coeff = _resolution_fano_coeff(params)
     sigma = torch.sqrt(
         (params["FWHM_OFFSET"] / 2.3548) ** 2
-        + compton_E * 2.96 * params["FWHM_FANOPRIME"]
+        + compton_E * fano_coeff * params["FWHM_FANOPRIME"]
     )
     # Broadcast per-spectrum scalars over the channel axis if needed.
     if isinstance(compton_E, torch.Tensor) and compton_E.ndim == ev.ndim - 1:
@@ -257,7 +287,7 @@ def build_model_basis(
                 spec = elastic_peak(unit_params, ev, unit_params["ENERGY_SLOPE"])
             elif comp == "COMPTON_AMPLITUDE":
                 unit_params[comp] = torch.tensor(0.0, device=device, dtype=ev.dtype)
-                spec = compton_peak(unit_params, ev, unit_params["ENERGY_SLOPE"], True, False)
+                spec = compton_peak(unit_params, ev, unit_params["ENERGY_SLOPE"], True, True)
             else:
                 unit_params[comp] = torch.tensor(0.0, device=device, dtype=ev.dtype)
                 spec = model_elem_spec(
@@ -265,7 +295,7 @@ def build_model_basis(
                     comp,
                     ev,
                     True,
-                    False,
+                    True,
                     device=device,
                     e_consts=e_consts,
                     elem_info=elem_info,
@@ -296,19 +326,23 @@ def _binding_energy_mask(er_struct, coherent_sct_energy, elem_info):
         return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
 
     if getattr(er_struct, "is_pileup", False):
-        base_names = str(er_struct.name).split("_")
-        if len(base_names) != 2:
+        components = getattr(er_struct, "pileup_components", ()) or parse_pileup_descriptor(
+            er_struct.name
+        )
+        if components is None:
             return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
-        el1_name, el2_name = base_names
-        e1 = next((e for e in elem_info if e.name == el1_name), None)
-        e2 = next((e for e in elem_info if e.name == el2_name), None)
-        if e1 is None or e2 is None:
-            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
-        k1 = float(e1.bindingE.get("K", 0.0))
-        k2 = float(e2.bindingE.get("K", 0.0))
-        if k1 <= 0.0 or k2 <= 0.0:
-            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
-        return (coherent_sct_energy > k1) & (coherent_sct_energy > k2)
+
+        component_ptypes = getattr(er_struct, "pileup_ptypes", ()) or ()
+        mask = torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+        for idx, (elem_name, shell) in enumerate(components):
+            e_info = next((e for e in elem_info if e.name == elem_name), None)
+            if e_info is None:
+                return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+            ptype = component_ptypes[idx] if idx < len(component_ptypes) else ""
+            thr = binding_threshold_for_line(e_info, ptype, shell)
+            if thr > 0.0:
+                mask = mask & (coherent_sct_energy > thr)
+        return mask
 
     elname = str(er_struct.name).split("_")[0]
     e_info = next((e for e in elem_info if e.name == elname), None)
@@ -316,30 +350,8 @@ def _binding_energy_mask(er_struct, coherent_sct_energy, elem_info):
         return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
 
     ptype = str(getattr(er_struct, "ptype", ""))
-    if ptype.startswith("K"):
-        thr = float(e_info.bindingE.get("K", 0.0))
-        if thr <= 0.0:
-            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
-        return coherent_sct_energy > thr
-
-    if ptype.startswith("L"):
-        if ptype in ["Lb3", "Lb4", "Lg2", "Lg3", "Lg4"]:
-            key = "L1"
-        elif ptype in ["Lb1", "Lg1", "Ln"]:
-            key = "L2"
-        elif ptype in ["La1", "La2", "Lb2", "Ll"]:
-            key = "L3"
-        else:
-            return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
-        thr = float(e_info.bindingE.get(key, 0.0))
-        if thr <= 0.0:
-            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
-        return coherent_sct_energy > thr
-
-    if ptype.startswith("M"):
-        thr = float(e_info.bindingE.get("M1", 0.0))
-        if thr <= 0.0:
-            return torch.ones_like(coherent_sct_energy, dtype=torch.bool)
+    thr = binding_threshold_for_line(e_info, ptype)
+    if thr > 0.0:
         return coherent_sct_energy > thr
 
     return torch.zeros_like(coherent_sct_energy, dtype=torch.bool)
@@ -367,10 +379,11 @@ def model_elem_spec(
     energy_slope = params["ENERGY_SLOPE"]
     if isinstance(energy_slope, torch.Tensor) and energy_slope.ndim == ev.ndim - 1:
         energy_slope = energy_slope.unsqueeze(-1)
+    fano_coeff = _resolution_fano_coeff(params)
     for er_struct in e_consts[element_to_fit]:
         sigma = torch.sqrt(
             (params["FWHM_OFFSET"] / 2.3548) ** 2
-            + er_struct.energy * 2.96 * params["FWHM_FANOPRIME"]
+            + er_struct.energy * fano_coeff * params["FWHM_FANOPRIME"]
         )
         if isinstance(sigma, torch.Tensor) and sigma.ndim == ev.ndim - 1:
             sigma = sigma.unsqueeze(-1)
@@ -510,7 +523,7 @@ def model_spec(
                     e,
                     ev,
                     True,
-                    False,
+                    True,
                     device=device,
                     e_consts=e_consts,
                     elem_info=elem_info,
@@ -519,11 +532,13 @@ def model_spec(
             except Exception:
                 print("Failed to model spectrum for", e)
     elastic_spec = elastic_peak(params, ev, energy_slope)
-    compton_spec = compton_peak(params, ev, energy_slope, True, False)
+    compton_spec = compton_peak(params, ev, energy_slope, True, True)
     agr_spec.add_(elastic_spec)
     agr_spec.add_(compton_spec)
     if escape_factor > 0.0:
         with torch.no_grad():
+            # Escape reindexes channels via round/gather, so we keep it outside the
+            # autograd path until a differentiable surrogate is introduced.
             escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type)
             agr_spec.add_(escape_spec)
     return agr_spec

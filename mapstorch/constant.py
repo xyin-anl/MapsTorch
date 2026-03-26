@@ -1386,58 +1386,147 @@ class EnergyStruct:
         self.type = 0
         self.ptype = ""
         self.is_pileup = False
+        self.pileup_components = ()
+        self.pileup_ptypes = ()
 
     def check_binding_energy(self, info_elements, coherent_sct_energy):
         if self.type == 0:
             return False
         elif self.is_pileup:
-            base_names = self.name.split("_")
-            if len(base_names) != 2:
+            components = self.pileup_components or parse_pileup_descriptor(self.name)
+            if components is None:
                 return True
-
-            el1_name, el2_name = base_names
-            e1 = None
-            e2 = None
-            for info in info_elements:
-                if info.name == el1_name:
-                    e1 = info
-                elif info.name == el2_name:
-                    e2 = info
-                if e1 is not None and e2 is not None:
-                    break
-
-            if e1 is None or e2 is None:
-                return True
-
-            k1 = e1.bindingE.get("K", 0.0)
-            k2 = e2.bindingE.get("K", 0.0)
-            if k1 <= 0.0 or k2 <= 0.0:
-                return True
-
-            return (k1 < coherent_sct_energy) and (k2 < coherent_sct_energy)
+            component_ptypes = self.pileup_ptypes or ()
+            for idx, (elem_name, shell) in enumerate(components):
+                e_info = next((e for e in info_elements if e.name == elem_name), None)
+                if e_info is None:
+                    return True
+                ptype = component_ptypes[idx] if idx < len(component_ptypes) else ""
+                thr = binding_threshold_for_line(e_info, ptype, shell)
+                if thr > 0.0 and coherent_sct_energy <= thr:
+                    return False
+            return True
         else:
             elname = self.name.split("_")[0]
             e_info = next((e for e in info_elements if e.name == elname), None)
             if e_info is None:
                 return True
             else:
-                if self.ptype.startswith("K"):
-                    return e_info.bindingE["K"] < coherent_sct_energy
-                elif self.ptype.startswith("L"):
-                    if self.ptype in ["Lb3", "Lb4", "Lg2", "Lg3", "Lg4"]:
-                        return e_info.bindingE["L1"] < coherent_sct_energy
-                    elif self.ptype in ["Lb1", "Lg1", "Ln"]:
-                        return e_info.bindingE["L2"] < coherent_sct_energy
-                    elif self.ptype in ["La1", "La2", "Lb2", "Ll"]:
-                        return e_info.bindingE["L3"] < coherent_sct_energy
-                    else:
-                        print(f"Error: Unknown L shell type {self.ptype}")
-                elif self.ptype.startswith("M"):
-                    return e_info.bindingE["M1"] < coherent_sct_energy
-                return False
+                thr = binding_threshold_for_line(e_info, self.ptype)
+                if thr <= 0.0:
+                    return False
+                return thr < coherent_sct_energy
 
     def __repr__(self) -> str:
         return f"{self.name} {self.ptype} {self.energy} {self.ratio} {self.mu_fraction} {self.width_multi}"
+
+
+PILEUP_SHELL_TYPES = {"L", "M"}
+
+
+def parse_pileup_descriptor(name):
+    tokens = [tok.strip() for tok in str(name).split("_") if tok.strip()]
+    if not tokens:
+        return None
+
+    components = []
+    idx = 0
+    while idx < len(tokens):
+        elem_name = tokens[idx]
+        idx += 1
+        shell = "K"
+        if idx < len(tokens) and tokens[idx] in PILEUP_SHELL_TYPES:
+            shell = tokens[idx]
+            idx += 1
+        components.append((elem_name, shell))
+
+    if len(components) != 2:
+        return None
+    return tuple(components)
+
+
+def binding_threshold_for_line(e_info, ptype="", shell_hint=""):
+    ptype = str(ptype or "")
+    shell_hint = str(shell_hint or "")
+
+    if ptype.startswith("K"):
+        shell = "K"
+    elif ptype.startswith("L"):
+        shell = "L"
+    elif ptype.startswith("M"):
+        shell = "M"
+    else:
+        shell = shell_hint
+
+    if shell == "K":
+        return float(e_info.bindingE.get("K", 0.0))
+    if shell == "L":
+        if ptype in ["Lb3", "Lb4", "Lg2", "Lg3", "Lg4"]:
+            key = "L1"
+        elif ptype in ["Lb1", "Lg1", "Ln"]:
+            key = "L2"
+        else:
+            key = "L3"
+        return float(e_info.bindingE.get(key, 0.0))
+    if shell == "M":
+        return float(e_info.bindingE.get("M1", 0.0))
+    return 0.0
+
+
+def _safe_ratio(info, num_key, den_key):
+    num = float(info.xrf_abs_yield.get(num_key, 0.0))
+    den = float(info.xrf_abs_yield.get(den_key, 0.0))
+    if num <= 0.0 or den <= 0.0:
+        return 0.0
+    return num / den
+
+
+def _shell_line_defs(info, shell):
+    shell = str(shell or "K")
+    if shell == "K":
+        return [
+            {
+                "energy": float(info.xrf.get("ka1", 0.0)),
+                "ratio": 1.0,
+                "ptype": "Ka1",
+                "type": 1,
+            },
+            {
+                "energy": float(info.xrf.get("kb1", 0.0)),
+                "ratio": _safe_ratio(info, "kb1", "ka1"),
+                "ptype": "Kb1",
+                "type": 2,
+            },
+        ]
+    if shell == "L":
+        return [
+            {"energy": float(info.xrf.get("la1", 0.0)), "ratio": 1.0, "ptype": "La1", "type": 3},
+            {"energy": float(info.xrf.get("la2", 0.0)), "ratio": _safe_ratio(info, "la2", "la1"), "ptype": "La2", "type": 3},
+            {"energy": float(info.xrf.get("lb1", 0.0)), "ratio": _safe_ratio(info, "lb1", "la1"), "ptype": "Lb1", "type": 3},
+            {"energy": float(info.xrf.get("lb2", 0.0)), "ratio": _safe_ratio(info, "lb2", "la1"), "ptype": "Lb2", "type": 3},
+            {"energy": float(info.xrf.get("lb3", 0.0)), "ratio": _safe_ratio(info, "lb3", "la1"), "ptype": "Lb3", "type": 3},
+            {"energy": float(info.xrf.get("lb4", 0.0)), "ratio": _safe_ratio(info, "lb4", "la1"), "ptype": "Lb4", "type": 3},
+            {"energy": float(info.xrf.get("lg1", 0.0)), "ratio": _safe_ratio(info, "lg1", "la1"), "ptype": "Lg1", "type": 3},
+            {"energy": float(info.xrf.get("lg2", 0.0)), "ratio": _safe_ratio(info, "lg2", "la1"), "ptype": "Lg2", "type": 3},
+            {"energy": float(info.xrf.get("lg3", 0.0)), "ratio": _safe_ratio(info, "lg3", "la1"), "ptype": "Lg3", "type": 3},
+            {"energy": float(info.xrf.get("lg4", 0.0)), "ratio": _safe_ratio(info, "lg4", "la1"), "ptype": "Lg4", "type": 3},
+            {"energy": float(info.xrf.get("ll", 0.0)), "ratio": _safe_ratio(info, "ll", "la1"), "ptype": "Ll", "type": 3},
+            {"energy": float(info.xrf.get("ln", 0.0)), "ratio": _safe_ratio(info, "ln", "la1"), "ptype": "Ln", "type": 3},
+        ]
+    if shell == "M":
+        return [
+            {"energy": float(info.xrf.get("ma1", 0.0)), "ratio": 1.0, "ptype": "Ma1", "type": 7},
+            {"energy": float(info.xrf.get("ma2", 0.0)), "ratio": _safe_ratio(info, "ma2", "ma1"), "ptype": "Ma2", "type": 7},
+            {"energy": float(info.xrf.get("mb", 0.0)), "ratio": _safe_ratio(info, "mb", "ma1"), "ptype": "Mb", "type": 7},
+            {"energy": float(info.xrf.get("mg", 0.0)), "ratio": _safe_ratio(info, "mg", "ma1"), "ptype": "Mg", "type": 7},
+        ]
+    return []
+
+
+def _representative_pileup_line(line1, line2):
+    if float(line2["ratio"]) < float(line1["ratio"]):
+        return line2
+    return line1
 
 
 def calculate_mu_fractions(pars, info_elements, calc_range):
@@ -1525,94 +1614,91 @@ def calculate_mu_fractions(pars, info_elements, calc_range):
 
 
 def define_pileup_constants(info_elements, pileups, return_dict=False):
-    pileup_pars = np.empty((len(pileups), 12), dtype=object)
-    for i in range(len(pileups)):
-        for j in range(12):
-            pileup_pars[i, j] = EnergyStruct()
-    st = "".join([" "] * 32)
-    pileup_name = np.array([st] * len(pileups))
+    pileup_rows = []
+    pileup_names = []
 
-    for i, pileup in enumerate(pileups):
-        pileup_name[i] = pileup
-        str_list = pileup.split("_")
-        e_1, e_2 = "", ""
-        if len(str_list) == 2:
-            e_1, e_2 = str_list
-        elif len(str_list) == 3:
-            if str_list[1] == "L" or str_list[1] == "M":
-                e_1, e_2 = str_list[0], str_list[2]
-            elif str_list[2] == "L" or str_list[2] == "M":
-                e_1, e_2 = str_list[0], str_list[1]
-            else:
-                print(
-                    f"Pileup {pileup} skipped. Currently only A_B pileups are supported."
-                )
-                continue
-        elif len(str_list) == 4:
-            if (str_list[1] == "L" or str_list[1] == "M") and (
-                str_list[3] == "L" or str_list[3] == "M"
-            ):
-                e_1, e_2 = str_list[0], str_list[2]
-            else:
-                print(
-                    f"Pileup {pileup} skipped. Currently only A_B pileups are supported."
-                )
-                continue
-        else:
-            print(f"Pileup {pileup} skipped. Currently only A_B pileups are supported.")
+    for pileup in pileups:
+        pileup = str(pileup).strip()
+        if not pileup:
             continue
 
-        if len(e_1) > 0 and len(e_2) > 0:
-            for j in range(len(info_elements)):
-                if info_elements[j].name == e_1:
-                    for k in range(len(info_elements)):
-                        if info_elements[k].name == e_2:
-                            for l in range(12):
-                                pileup_pars[i, l].name = pileup
+        components = parse_pileup_descriptor(pileup)
+        if components is None:
+            print(
+                f"Pileup {pileup} skipped. Only binary pileups are supported; shell suffixes like _L and _M are allowed."
+            )
+            continue
 
-                            pileup_pars[i, 0].energy = (
-                                info_elements[j].xrf["ka1"]
-                                + info_elements[k].xrf["ka1"]
-                            )
-                            pileup_pars[i, 1].energy = (
-                                info_elements[j].xrf["ka1"]
-                                + info_elements[k].xrf["kb1"]
-                            )
-                            pileup_pars[i, 2].energy = (
-                                info_elements[j].xrf["kb1"]
-                                + info_elements[k].xrf["kb1"]
-                            )
-                            pileup_pars[i, 0].ratio = 1.0
-                            pileup_pars[i, 1].ratio = (
-                                info_elements[k].xrf_abs_yield["kb1"]
-                                / info_elements[k].xrf_abs_yield["ka1"]
-                            )
-                            pileup_pars[i, 2].ratio = (
-                                info_elements[j].xrf_abs_yield["kb1"]
-                                / info_elements[j].xrf_abs_yield["ka1"]
-                            ) * pileup_pars[i, 1].ratio
-                            pileup_pars[i, 0].type = 1
-                            pileup_pars[i, 1].type = 2
-                            pileup_pars[i, 2].type = 2
-                            pileup_pars[i, 0].is_pileup = True
-                            pileup_pars[i, 1].is_pileup = True
-                            pileup_pars[i, 2].is_pileup = True
-                            if e_1 != e_2:
-                                pileup_pars[i, 3].energy = (
-                                    info_elements[j].xrf["kb1"]
-                                    + info_elements[k].xrf["ka1"]
-                                )
-                                pileup_pars[i, 3].ratio = (
-                                    info_elements[j].xrf_abs_yield["kb1"]
-                                    / info_elements[j].xrf_abs_yield["ka1"]
-                                )
-                                pileup_pars[i, 3].type = 2
-                                pileup_pars[i, 3].is_pileup = True
-                            break
-                    else:
-                        continue
-                    break
-    calculate_mu_fractions(pileup_pars, info_elements, len(pileups))
+        (elem1, shell1), (elem2, shell2) = components
+        info1 = next((info for info in info_elements if info.name == elem1), None)
+        info2 = next((info for info in info_elements if info.name == elem2), None)
+        if info1 is None or info2 is None:
+            print(f"Pileup {pileup} skipped. Unknown element name in pileup descriptor.")
+            continue
+
+        lines1 = [
+            line
+            for line in _shell_line_defs(info1, shell1)
+            if float(line["energy"]) > 0.0 and float(line["ratio"]) > 0.0
+        ]
+        lines2 = [
+            line
+            for line in _shell_line_defs(info2, shell2)
+            if float(line["energy"]) > 0.0 and float(line["ratio"]) > 0.0
+        ]
+        if not lines1 or not lines2:
+            continue
+
+        same_component = elem1 == elem2 and shell1 == shell2
+        peak_defs = []
+        for idx1, line1 in enumerate(lines1):
+            idx2_start = idx1 if same_component else 0
+            for idx2 in range(idx2_start, len(lines2)):
+                line2 = lines2[idx2]
+                ratio = float(line1["ratio"]) * float(line2["ratio"])
+                energy = float(line1["energy"]) + float(line2["energy"])
+                if ratio <= 0.0 or energy <= 0.0:
+                    continue
+                rep_line = _representative_pileup_line(line1, line2)
+                peak_defs.append(
+                    {
+                        "energy": energy,
+                        "ratio": ratio,
+                        "ptype": rep_line["ptype"],
+                        "type": rep_line["type"],
+                        "component_ptypes": (line1["ptype"], line2["ptype"]),
+                    }
+                )
+
+        if not peak_defs:
+            continue
+
+        peak_defs.sort(key=lambda item: (-item["ratio"], item["energy"]))
+        pileup_row = np.empty((12,), dtype=object)
+        for j in range(12):
+            pileup_row[j] = EnergyStruct()
+            pileup_row[j].name = pileup
+
+        for j, peak in enumerate(peak_defs[:12]):
+            pileup_row[j].energy = peak["energy"]
+            pileup_row[j].ratio = peak["ratio"]
+            pileup_row[j].type = peak["type"]
+            pileup_row[j].ptype = peak["ptype"]
+            pileup_row[j].is_pileup = True
+            pileup_row[j].pileup_components = components
+            pileup_row[j].pileup_ptypes = peak["component_ptypes"]
+
+        pileup_rows.append(pileup_row)
+        pileup_names.append(pileup)
+
+    if pileup_rows:
+        pileup_pars = np.asarray(pileup_rows, dtype=object)
+        calculate_mu_fractions(pileup_pars, info_elements, len(pileup_rows))
+    else:
+        pileup_pars = np.empty((0, 12), dtype=object)
+        pileup_names = []
+
+    pileup_name = np.array(pileup_names, dtype=object)
     if return_dict:
         return {
             pileup_pars[i, 0].name: pileup_pars[i] for i in range(pileup_pars.shape[0])
@@ -1823,7 +1909,7 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
 
                 if tag == "ELEMENTS_WITH_PILEUP":
                     pileups = value.split(",")
-                    pileups = [x.strip() for x in pileups]
+                    pileups = [x.strip() for x in pileups if x.strip()]
                     pileup_pars, pileup_name = define_pileup_constants(
                         info_elements, pileups
                     )
