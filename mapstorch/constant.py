@@ -1814,85 +1814,83 @@ def define_constants(info_elements, pileups=None, return_dict=True):
 
 def read_constants(filename, info_elements, pileups=None, return_dict=True):
     e_pars, s_name = define_constants(info_elements, pileups, False)
-    f = open(str(filename), "rt")
-    if f == None:
-        return None, None, None
-    for line in f:
-        if ":" in line:
-            slist = line.split(":")
-            tag = slist[0]
-            value = "".join(slist[1:])
+    with open(str(filename), "rt") as f:
+        for line in f:
+            if ":" in line:
+                slist = line.split(":")
+                tag = slist[0]
+                value = "".join(slist[1:])
 
-            if tag == "ELEMENTS_WITH_PILEUP":
-                pileups = value.split(",")
-                pileups = [x.strip() for x in pileups]
-                pileup_pars, pileup_name = define_pileup_constants(
-                    info_elements, pileups
-                )
-                e_pars = np.vstack((e_pars, pileup_pars))
-                s_name = np.append(s_name, pileup_name)
+                if tag == "ELEMENTS_WITH_PILEUP":
+                    pileups = value.split(",")
+                    pileups = [x.strip() for x in pileups]
+                    pileup_pars, pileup_name = define_pileup_constants(
+                        info_elements, pileups
+                    )
+                    e_pars = np.vstack((e_pars, pileup_pars))
+                    s_name = np.append(s_name, pileup_name)
 
-            elif tag == "DETECTOR_MATERIAL":
-                temp = int(value)
-                parsdims = e_pars.shape
-                if temp == 1:
-                    for i in range(parsdims[0]):
-                        for j in range(parsdims[1]):
-                            e_pars[i, j].mu_fraction = e_pars[i, j].Si_mu
-                else:
-                    for i in range(parsdims[0]):
-                        for j in range(parsdims[1]):
-                            e_pars[i, j].mu_fraction = e_pars[i, j].Ge_mu
-
-            elif tag == "BRANCHING_FAMILY_ADJUSTMENT_L":
-                temp_string = value.split(",")
-                temp_string = [x.strip() for x in temp_string]
-                wo = np.where(s_name == temp_string[0])
-
-                if (wo[0].size > 0) and (len(temp_string) == 4):
-                    ii = wo[0][0]
-                    factor_l1 = float(temp_string[1])
-                    factor_l2 = float(temp_string[2])
-                    factor_l3 = float(temp_string[3])
-                    name = temp_string[0].strip()
-                    el_names = [x.name for x in info_elements]
-                    if name[:-2] in el_names:
-                        j = el_names.index(name[:-2])
+                elif tag == "DETECTOR_MATERIAL":
+                    temp = int(value)
+                    parsdims = e_pars.shape
+                    if temp == 1:
+                        for i in range(parsdims[0]):
+                            for j in range(parsdims[1]):
+                                e_pars[i, j].mu_fraction = e_pars[i, j].Si_mu
                     else:
-                        j = -1
+                        for i in range(parsdims[0]):
+                            for j in range(parsdims[1]):
+                                e_pars[i, j].mu_fraction = e_pars[i, j].Ge_mu
 
-                    if j > 0:
-                        e_pars[ii, 0].ratio = 1.0
-                        e_pars[ii, 1].ratio = (
-                            info_elements[j].xrf_abs_yield["la2"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 2].ratio = (
-                            info_elements[j].xrf_abs_yield["lb1"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 3].ratio = (
-                            info_elements[j].xrf_abs_yield["lb2"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 4].ratio = (
-                            info_elements[j].xrf_abs_yield["lb3"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 5].ratio = (
-                            info_elements[j].xrf_abs_yield["lb4"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 6].ratio = (
-                            info_elements[j].xrf_abs_yield["lg1"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 7].ratio = (
-                            info_elements[j].xrf_abs_yield["lg2"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 8].ratio = (
-                            info_elements[j].xrf_abs_yield["lg3"]
+                elif tag == "BRANCHING_FAMILY_ADJUSTMENT_L":
+                    temp_string = value.split(",")
+                    temp_string = [x.strip() for x in temp_string]
+                    wo = np.where(s_name == temp_string[0])
+
+                    if (wo[0].size > 0) and (len(temp_string) == 4):
+                        ii = wo[0][0]
+                        factor_l1 = float(temp_string[1])
+                        factor_l2 = float(temp_string[2])
+                        factor_l3 = float(temp_string[3])
+                        name = temp_string[0].strip()
+                        el_names = [x.name for x in info_elements]
+                        if name[:-2] in el_names:
+                            j = el_names.index(name[:-2])
+                        else:
+                            j = -1
+
+                        if j > 0:
+                            e_pars[ii, 0].ratio = 1.0
+                            e_pars[ii, 1].ratio = (
+                                info_elements[j].xrf_abs_yield["la2"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 2].ratio = (
+                                info_elements[j].xrf_abs_yield["lb1"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 3].ratio = (
+                                info_elements[j].xrf_abs_yield["lb2"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 4].ratio = (
+                                info_elements[j].xrf_abs_yield["lb3"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 5].ratio = (
+                                info_elements[j].xrf_abs_yield["lb4"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 6].ratio = (
+                                info_elements[j].xrf_abs_yield["lg1"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 7].ratio = (
+                                info_elements[j].xrf_abs_yield["lg2"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 8].ratio = (
+                                info_elements[j].xrf_abs_yield["lg3"]
                             / info_elements[j].xrf_abs_yield["la1"]
                         )
                         e_pars[ii, 9].ratio = (
@@ -1920,66 +1918,66 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
                         e_pars[ii, 8].ratio *= factor_l1
                         e_pars[ii, 9].ratio *= factor_l1
 
-            elif tag == "BRANCHING_RATIO_ADJUSTMENT_L":
-                temp_string = value.split(",")
-                temp_string = [x.strip() for x in temp_string]
-                wo = np.where(s_name == temp_string[0])
+                elif tag == "BRANCHING_RATIO_ADJUSTMENT_L":
+                    temp_string = value.split(",")
+                    temp_string = [x.strip() for x in temp_string]
+                    wo = np.where(s_name == temp_string[0])
 
-                if wo[0].size > 0 and len(temp_string) >= 13:
-                    ii = wo[0][0]
-                    name = temp_string[0].strip()
-                    el_names = [x.name for x in info_elements]
+                    if wo[0].size > 0 and len(temp_string) >= 13:
+                        ii = wo[0][0]
+                        name = temp_string[0].strip()
+                        el_names = [x.name for x in info_elements]
 
-                    if len(temp_string) >= 13:
-                        for jj in range(12):
-                            e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
+                        if len(temp_string) >= 13:
+                            for jj in range(12):
+                                e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
 
-            elif tag == "BRANCHING_RATIO_ADJUSTMENT_K":
-                temp_string = value.split(",")
-                temp_string = [x.strip() for x in temp_string]
-                wo = np.where(s_name == temp_string[0])
+                elif tag == "BRANCHING_RATIO_ADJUSTMENT_K":
+                    temp_string = value.split(",")
+                    temp_string = [x.strip() for x in temp_string]
+                    wo = np.where(s_name == temp_string[0])
 
-                if (wo[0].size > 0) and (len(temp_string) == 5):
-                    ii = wo[0][0]
-                    name = temp_string[0].strip()
-                    el_names = [x.name for x in info_elements]
-                    if name[:-2] in el_names:
-                        j = el_names.index(name[:-2])
-                    else:
-                        j = -1
+                    if (wo[0].size > 0) and (len(temp_string) == 5):
+                        ii = wo[0][0]
+                        name = temp_string[0].strip()
+                        el_names = [x.name for x in info_elements]
+                        if name[:-2] in el_names:
+                            j = el_names.index(name[:-2])
+                        else:
+                            j = -1
 
-                    if j > 0:
-                        e_pars[ii, 0].ratio = 1.0
-                        e_pars[ii, 1].ratio = (
-                            info_elements[j].xrf_abs_yield["ka2"]
-                            / info_elements[j].xrf_abs_yield["ka1"]
-                        )
-                        e_pars[ii, 2].ratio = (
-                            info_elements[j].xrf_abs_yield["kb1"]
-                            / info_elements[j].xrf_abs_yield["ka1"]
-                        )
-                        e_pars[ii, 3].ratio = (
-                            info_elements[j].xrf_abs_yield["kb2"]
-                            / info_elements[j].xrf_abs_yield["ka1"]
-                        )
+                        if j > 0:
+                            e_pars[ii, 0].ratio = 1.0
+                            e_pars[ii, 1].ratio = (
+                                info_elements[j].xrf_abs_yield["ka2"]
+                                / info_elements[j].xrf_abs_yield["ka1"]
+                            )
+                            e_pars[ii, 2].ratio = (
+                                info_elements[j].xrf_abs_yield["kb1"]
+                                / info_elements[j].xrf_abs_yield["ka1"]
+                            )
+                            e_pars[ii, 3].ratio = (
+                                info_elements[j].xrf_abs_yield["kb2"]
+                                / info_elements[j].xrf_abs_yield["ka1"]
+                            )
 
-                    if len(temp_string) >= 5:
-                        for jj in range(4):
-                            e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
+                        if len(temp_string) >= 5:
+                            for jj in range(4):
+                                e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
 
-            elif tag == "TAIL_FRACTION_ADJUST_SI":
-                temp = float(value)
-                wo = np.where(s_name == "Si")
-                if wo[0].size > 0:
-                    ii = wo[0][0]
-                    e_pars[ii, :].mu_fraction = temp * e_pars[ii, :].mu_fraction
+                elif tag == "TAIL_FRACTION_ADJUST_SI":
+                    temp = float(value)
+                    wo = np.where(s_name == "Si")
+                    if wo[0].size > 0:
+                        ii = wo[0][0]
+                        e_pars[ii, :].mu_fraction = temp * e_pars[ii, :].mu_fraction
 
-            elif tag == "TAIL_WIDTH_ADJUST_SI":
-                temp = float(value)
-                wo = np.where(s_name == "Si")
-                if wo[0].size > 0:
-                    ii = wo[0][0]
-                    e_pars[ii, 0:3].width_multi = temp
+                elif tag == "TAIL_WIDTH_ADJUST_SI":
+                    temp = float(value)
+                    wo = np.where(s_name == "Si")
+                    if wo[0].size > 0:
+                        ii = wo[0][0]
+                        e_pars[ii, 0:3].width_multi = temp
 
     if return_dict:
         return {e_pars[i, 0].name: e_pars[i] for i in range(e_pars.shape[0])}

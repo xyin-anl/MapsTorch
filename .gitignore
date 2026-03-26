@@ -142,6 +142,8 @@ results/*
 bin/*
 data/*
 examples/*
+outputs/*
+plots/*
 *runs/*
 *.pkl
 *.pickle
