@@ -53,11 +53,11 @@ from matplotlib import colors as mcolors
 from matplotlib.transforms import blended_transform_factory
 
 plt.style.use(["science", "notebook", "retro"])
-from scipy.signal import find_peaks
 
+from mapstorch.constant import parse_pileup_descriptor
 from mapstorch.map import model_elem_spec, compton_peak, elastic_peak
 from mapstorch.util import get_peak_ranges
-from mapstorch.default import default_fitting_elems
+from mapstorch.default import default_energy_consts, default_param_vals
 
 _ELEMENT_COLOR_MAP: dict[str, tuple] = {}
 _ELEMENT_MARKER_ALPHA = 0.5
@@ -71,6 +71,15 @@ def _format_elem_label(elem: str) -> str:
     }
     if elem in special:
         return special[elem]
+    components = parse_pileup_descriptor(elem)
+    if components is not None:
+        labels = [
+            elem_name if shell == "K" else f"{elem_name} {shell}"
+            for elem_name, shell in components
+        ]
+        if len(labels) == 2 and labels[0] == labels[1]:
+            return f"{labels[0]} pileup"
+        return f"{' + '.join(labels)} pileup"
     token = elem.split("_")[0]
     return token.title()
 
@@ -98,11 +107,28 @@ def _element_color_with_fade(elem, idx=0, fade_factor=_DEFAULT_FADE_FACTOR):
     return _with_alpha(base_color, alpha=alpha)
 
 
-def _select_target_elements(tensors, target_elems, n_elem, reverse):
+def _default_plot_components(tensors, e_consts=default_energy_consts):
+    elems = []
+    for elem in e_consts:
+        if elem in tensors:
+            elems.append(elem)
+    for elem in ("COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"):
+        if elem in tensors and elem not in elems:
+            elems.append(elem)
+    for elem in tensors:
+        if elem in elems or elem in default_param_vals:
+            continue
+        elems.append(elem)
+    return elems
+
+
+def _select_target_elements(
+    tensors, target_elems, n_elem, reverse, *, e_consts=default_energy_consts
+):
     elems = (
         target_elems
         if target_elems is not None
-        else [e for e in default_fitting_elems if e in tensors]
+        else _default_plot_components(tensors, e_consts=e_consts)
     )
     elems = [e for e in elems if e in tensors]
     elems = sorted(elems, key=lambda e: tensors[e].item(), reverse=reverse)
@@ -111,7 +137,9 @@ def _select_target_elements(tensors, target_elems, n_elem, reverse):
     return elems[:n_elem]
 
 
-def _compute_element_ranges(tensors, elements, energy_range):
+def _compute_element_ranges(
+    tensors, elements, energy_range, *, e_consts=default_energy_consts
+):
     coherent = float(tensors["COHERENT_SCT_ENERGY"].item())
     compton_angle = float(tensors["COMPTON_ANGLE"].item())
     energy_offset = float(tensors["ENERGY_OFFSET"].item())
@@ -120,7 +148,10 @@ def _compute_element_ranges(tensors, elements, energy_range):
 
     elem_ranges = {}
     for elem in elements:
-        if elem not in default_fitting_elems:
+        if elem not in e_consts and elem not in {
+            "COMPTON_AMPLITUDE",
+            "COHERENT_SCT_AMPLITUDE",
+        }:
             continue
         try:
             rg = get_peak_ranges(
@@ -131,6 +162,7 @@ def _compute_element_ranges(tensors, elements, energy_range):
                 energy_slope,
                 energy_quadratic,
                 energy_range,
+                e_consts=e_consts,
             )
         except Exception:
             continue
@@ -241,12 +273,19 @@ def _setup_element_plot(
     reverse,
     *,
     figsize=(12, 6),
+    e_consts=default_energy_consts,
 ):
     segment = int_spec[energy_range[0] : energy_range[1] + 1]
     target_elems = _select_target_elements(
-        tensors, target_elems=target_elems, n_elem=n_elem, reverse=reverse
+        tensors,
+        target_elems=target_elems,
+        n_elem=n_elem,
+        reverse=reverse,
+        e_consts=e_consts,
     )
-    elem_ranges = _compute_element_ranges(tensors, target_elems, energy_range)
+    elem_ranges = _compute_element_ranges(
+        tensors, target_elems, energy_range, e_consts=e_consts
+    )
     labels = _build_label_entries(elem_ranges, target_elems)
     fig, axs = plt.subplots(2, figsize=figsize)
     for ax in axs:
@@ -291,13 +330,14 @@ def plot_elem_amp_rank(
     filename="element_amplitude_rank.png",
     keep_negtive=False,
     fade_factor=_DEFAULT_FADE_FACTOR,
+    e_consts=default_energy_consts,
     save=False,
     show=False,
 ):
     target_elems = (
         target_elems
         if target_elems is not None
-        else [e for e in default_fitting_elems if e in tensors]
+        else _default_plot_components(tensors, e_consts=e_consts)
     )
     if keep_negtive:
         amps = {p: tensors[p].item() for p in target_elems}
@@ -335,6 +375,7 @@ def plot_elem_peak_ranges(
     reverse=True,
     filename="element_peak_ranges.png",
     fade_factor=_DEFAULT_FADE_FACTOR,
+    e_consts=default_energy_consts,
     save=False,
     show=False,
 ):
@@ -352,19 +393,19 @@ def plot_elem_peak_ranges(
         n_elem,
         reverse,
         figsize=(12, 6),
+        e_consts=e_consts,
     )
     res = {}
     for i, e in enumerate(target_elems):
-        if e in default_fitting_elems:
-            rg = elem_ranges.get(e)
-            if rg is None:
-                continue
-            res[e] = rg
-            ranges_sorted = sorted(rg.values(), key=lambda r: r[0])
-            for idx, r in enumerate(ranges_sorted):
-                color = _element_color_with_fade(e, idx, fade_factor)
-                axs[0].axvspan(r[0], r[1], facecolor=color)
-                axs[1].axvspan(r[0], r[1], facecolor=color)
+        rg = elem_ranges.get(e)
+        if rg is None:
+            continue
+        res[e] = rg
+        ranges_sorted = sorted(rg.values(), key=lambda r: r[0])
+        for idx, r in enumerate(ranges_sorted):
+            color = _element_color_with_fade(e, idx, fade_factor)
+            axs[0].axvspan(r[0], r[1], facecolor=color)
+            axs[1].axvspan(r[0], r[1], facecolor=color)
     axs[1].set_ylim(1, None)
     _annotate_element_labels(axs[0], labels, fade_factor=fade_factor)
     axs[1].set_yscale("log")
@@ -386,6 +427,7 @@ def plot_elem_peak_pos(
     filename="element_peak_positions.png",
     include_guides=True,
     fade_factor=_DEFAULT_FADE_FACTOR,
+    e_consts=default_energy_consts,
     save=False,
     show=False,
 ):
@@ -403,6 +445,7 @@ def plot_elem_peak_pos(
         n_elem,
         reverse,
         figsize=(12, 6),
+        e_consts=e_consts,
     )
     for e in target_elems:
         ranges = elem_ranges.get(e)
@@ -433,15 +476,18 @@ def plot_elem_spec_contribs(
     int_spec,
     energy_range,
     target_elems=None,
-    elem_amps={},
+    elem_amps=None,
     n_elem=None,
     reverse=True,
     filename="element_rank.png",
     fade_factor=_DEFAULT_FADE_FACTOR,
+    e_consts=default_energy_consts,
     save=False,
     show=False,
 ):
     with torch.no_grad():
+        if elem_amps is None:
+            elem_amps = {}
         (
             fig,
             axs,
@@ -456,13 +502,18 @@ def plot_elem_spec_contribs(
             n_elem,
             reverse,
             figsize=(12, 6),
+            e_consts=e_consts,
         )
         res = {}
         for i, e in enumerate(target_elems):
-            if e in default_fitting_elems and e in tensors:
-                og_tensor = tensors[e].clone()
-                amp_val = elem_amps.get(e, og_tensor.item())
-                tensors[e] = torch.tensor(amp_val, device=tensors[e].device)
+            if e not in tensors:
+                continue
+            og_tensor = tensors[e].clone()
+            amp_val = elem_amps.get(e, og_tensor.item())
+            tensors[e] = torch.tensor(
+                amp_val, device=tensors[e].device, dtype=tensors[e].dtype
+            )
+            try:
                 energy = torch.arange(
                     energy_range[0],
                     energy_range[1] + 1,
@@ -478,12 +529,21 @@ def plot_elem_spec_contribs(
                     spec = compton_peak(tensors, ev, tensors["ENERGY_SLOPE"])
                 elif e == "COHERENT_SCT_AMPLITUDE":
                     spec = elastic_peak(tensors, ev, tensors["ENERGY_SLOPE"])
+                elif e in e_consts:
+                    spec = model_elem_spec(
+                        tensors,
+                        e,
+                        ev,
+                        device=tensors[e].device,
+                        e_consts=e_consts,
+                    )
                 else:
-                    spec = model_elem_spec(tensors, e, ev, device=tensors[e].device)
+                    continue
                 res[e] = spec.cpu().numpy()
                 color = _element_color_with_fade(e, 0, fade_factor)
                 axs[0].plot(spec.cpu().numpy(), color=color)
                 axs[1].plot(spec.cpu().numpy(), color=color)
+            finally:
                 tensors[e] = og_tensor
         axs[1].set_ylim(1, None)
         _annotate_element_labels(axs[0], labels, fade_factor=fade_factor)

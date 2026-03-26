@@ -51,7 +51,6 @@ import anywidget
 import traitlets
 from mapstorch.constant import M_PI, ENERGY_RES_OFFSET, ENERGY_RES_SQRT
 from mapstorch.default import (
-    default_fitting_elems,
     default_energy_consts,
     default_param_vals,
 )
@@ -77,7 +76,7 @@ def get_peak_centers(
             )
         elif e == "COHERENT_SCT_AMPLITUDE":
             centers[e] = coherent_sct_energy
-        elif e in default_fitting_elems:
+        elif e in e_consts:
             for i, er in enumerate(e_consts[e]):
                 if er.energy > 0:
                     centers[e + "_" + str(i)] = er.energy
@@ -92,10 +91,13 @@ def get_peak_ranges(
     energy_slope,
     energy_quadratic,
     energy_range,
+    e_consts=default_energy_consts,
 ):
     energy = np.arange(energy_range[0], energy_range[1] + 1, dtype=float)
     ev = energy_offset + energy_slope * energy + energy_quadratic * (energy**2)
-    centers = get_peak_centers(elements, coherent_sct_energy, compton_angle)
+    centers = get_peak_centers(
+        elements, coherent_sct_energy, compton_angle, e_consts=e_consts
+    )
     ranges = {}
     for p, c in centers.items():
         try:

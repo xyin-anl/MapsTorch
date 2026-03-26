@@ -94,6 +94,7 @@ def main(args):
 
     # Determine fitting configuration
     elements_to_fit = elems
+    elements_with_pileup = []
     init_param_vals = param_default_vals
     e_consts = default_energy_consts
     override_params = None
@@ -164,7 +165,7 @@ def main(args):
     )
 
     # Extract and sort amplitudes of fitted elements
-    amps = {p: fitted_tensors[p].item() for p in elems if p in fitted_tensors}
+    amps = {p: fitted_tensors[p].item() for p in elements_to_fit if p in fitted_tensors}
     amps = dict(sorted(amps.items(), key=lambda item: item[1]))
 
     # Save override parameters if requested
@@ -177,7 +178,9 @@ def main(args):
         }
 
         # Get elements list
-        elements_to_save = [k for k in amps.keys()]
+        elements_to_save = [
+            k for k in amps.keys() if k not in set(elements_with_pileup)
+        ]
         invalid = [e for e in elements_to_save if e not in default_fitting_elems]
         if invalid:
             print(
@@ -189,7 +192,12 @@ def main(args):
         # Save to file
         output_file = params_output_path or "maps_fit_parameters_override_mapstorch.txt"
         write_override_params_file(
-            output_file, param_values=param_values, elements=elements_to_save
+            output_file,
+            param_values=param_values,
+            elements=elements_to_save,
+            elements_with_pileup=elements_with_pileup,
+            detector_material=detector_material,
+            escape_factor=escape_factor,
         )
         print(f"Parameters saved to {output_file}")
 
@@ -200,7 +208,9 @@ def main(args):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
-            target_elems = list(amps.keys()) or elems
+            target_elems = list(amps.keys()) or [
+                e for e in elements_to_fit if e in fitted_tensors
+            ]
 
             def plot_path(default_name: str) -> str:
                 return str(plot_output_dir / default_name)
@@ -230,6 +240,7 @@ def main(args):
                     int_spec=int_spec_og,
                     energy_range=energy_range,
                     target_elems=target_elems,
+                    e_consts=e_consts,
                     save=True,
                     show=False,
                     filename=plot_path("element_peaks.png"),
@@ -242,6 +253,7 @@ def main(args):
                     energy_range=energy_range,
                     target_elems=target_elems,
                     elem_amps=amps,
+                    e_consts=e_consts,
                     save=True,
                     show=False,
                     filename=plot_path("element_contribs.png"),
@@ -253,6 +265,7 @@ def main(args):
                     int_spec=int_spec_og,
                     energy_range=energy_range,
                     target_elems=target_elems,
+                    e_consts=e_consts,
                     save=True,
                     show=False,
                     filename=plot_path("element_peak_pos.png"),
