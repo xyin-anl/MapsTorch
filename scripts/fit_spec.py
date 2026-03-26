@@ -45,6 +45,19 @@ AVAILABLE_PLOT_CHOICES = tuple(
 )
 
 
+def _ordered_unique(items):
+    return list(dict.fromkeys(items))
+
+
+def _build_plot_target_elems(base_elems, fitted_tensors):
+    scatter = [
+        elem
+        for elem in ("COHERENT_SCT_AMPLITUDE", "COMPTON_AMPLITUDE")
+        if elem in fitted_tensors
+    ]
+    return _ordered_unique(list(base_elems) + scatter)
+
+
 def main(args):
     # Configuration parameters
     dataset = args.dataset
@@ -64,6 +77,7 @@ def main(args):
     plots_enabled = not args.disable_plots
     heuristics_enabled = not args.disable_heuristics
     plot_output_dir = Path(args.plot_output_dir)
+    output_prefix = args.output_prefix or Path(dataset).stem
     escape_factor = args.escape_factor
     if plots_enabled:
         plot_output_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +204,10 @@ def main(args):
         elements_to_save = [e for e in elements_to_save if e in default_fitting_elems]
 
         # Save to file
-        output_file = params_output_path or "maps_fit_parameters_override_mapstorch.txt"
+        output_file = (
+            params_output_path
+            or f"{output_prefix}_maps_fit_parameters_override_mapstorch.txt"
+        )
         write_override_params_file(
             output_file,
             param_values=param_values,
@@ -211,9 +228,10 @@ def main(args):
             target_elems = list(amps.keys()) or [
                 e for e in elements_to_fit if e in fitted_tensors
             ]
+            plot_target_elems = _build_plot_target_elems(target_elems, fitted_tensors)
 
             def plot_path(default_name: str) -> str:
-                return str(plot_output_dir / default_name)
+                return str(plot_output_dir / f"{output_prefix}_{default_name}")
 
             if "amp_rank" in plot_selections:
                 plot_elem_amp_rank(
@@ -239,7 +257,7 @@ def main(args):
                     fitted_tensors,
                     int_spec=int_spec_og,
                     energy_range=energy_range,
-                    target_elems=target_elems,
+                    target_elems=plot_target_elems,
                     e_consts=e_consts,
                     save=True,
                     show=False,
@@ -251,7 +269,7 @@ def main(args):
                     fitted_tensors,
                     int_spec=int_spec_og,
                     energy_range=energy_range,
-                    target_elems=target_elems,
+                    target_elems=plot_target_elems,
                     elem_amps=amps,
                     e_consts=e_consts,
                     save=True,
@@ -264,7 +282,7 @@ def main(args):
                     fitted_tensors,
                     int_spec=int_spec_og,
                     energy_range=energy_range,
-                    target_elems=target_elems,
+                    target_elems=plot_target_elems,
                     e_consts=e_consts,
                     save=True,
                     show=False,
@@ -298,6 +316,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-v", "--verbose", type=bool, default=True, help="Flag to print verbose output"
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default=None,
+        help="Filename prefix for plots and saved override parameters (default: dataset stem).",
     )
     parser.add_argument(
         "--int_spec_path",
@@ -342,8 +366,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--params_output_path",
         type=str,
-        default="maps_fit_parameters_override_mapstorch.txt",
-        help="Path to save the override parameters file",
+        default=None,
+        help=(
+            "Path to save the override parameters file. "
+            "Defaults to <output_prefix>_maps_fit_parameters_override_mapstorch.txt."
+        ),
     )
     parser.add_argument(
         "--plot_output_dir",

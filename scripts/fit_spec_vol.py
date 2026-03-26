@@ -734,6 +734,19 @@ def main(args):
             # Integrated-spectrum diagnostics (only when global fit is run).
             if fitted_tensors is not None:
                 int_spec = int_spec_og[energy_range[0] : energy_range[1] + 1]
+                plot_target_elems = list(
+                    dict.fromkeys(
+                        list(elements_to_fit)
+                        + [
+                            elem
+                            for elem in (
+                                "COHERENT_SCT_AMPLITUDE",
+                                "COMPTON_AMPLITUDE",
+                            )
+                            if elem in fitted_tensors
+                        ]
+                    )
+                )
 
                 if "specs" in plot_selections:
                     spectra = [int_spec, fitted_bkg, fitted_spec + fitted_bkg]
@@ -759,7 +772,7 @@ def main(args):
                         fitted_tensors,
                         int_spec=int_spec_og,
                         energy_range=energy_range,
-                        target_elems=list(elements_to_fit),
+                        target_elems=plot_target_elems,
                         e_consts=e_consts,
                         save=True,
                         show=False,
@@ -772,7 +785,7 @@ def main(args):
                         fitted_tensors,
                         int_spec=int_spec_og,
                         energy_range=energy_range,
-                        target_elems=list(elements_to_fit),
+                        target_elems=plot_target_elems,
                         elem_amps=amps,
                         e_consts=e_consts,
                         save=True,
@@ -785,7 +798,7 @@ def main(args):
                         fitted_tensors,
                         int_spec=int_spec_og,
                         energy_range=energy_range,
-                        target_elems=list(elements_to_fit),
+                        target_elems=plot_target_elems,
                         e_consts=e_consts,
                         save=True,
                         show=False,
