@@ -60,6 +60,8 @@ from mapstorch.default import (
     default_param_vals,
 )
 
+_MODEL_SPEC_FAILURE_CACHE: set[tuple[str, str, str]] = set()
+
 
 def peak(gain, sigma, delta_energy):
     return gain / (sigma * SQRT_2XPI) * torch.exp(-0.5 * (delta_energy / sigma) ** 2)
@@ -529,8 +531,14 @@ def model_spec(
                     elem_info=elem_info,
                 )
                 agr_spec.add_(element_spec)
-            except Exception:
-                print("Failed to model spectrum for", e)
+            except Exception as exc:
+                err_key = (str(e), type(exc).__name__, str(exc))
+                if err_key not in _MODEL_SPEC_FAILURE_CACHE:
+                    _MODEL_SPEC_FAILURE_CACHE.add(err_key)
+                    print(
+                        f"Failed to model spectrum for {e}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
     elastic_spec = elastic_peak(params, ev, energy_slope)
     compton_spec = compton_peak(params, ev, energy_slope, True, True)
     agr_spec.add_(elastic_spec)
