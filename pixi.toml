@@ -1,6 +1,6 @@
 [workspace]
 name = "mapstorch"
-version = "0.0.1"
+version = "0.0.2"
 description = "Development environment for the MapsTorch package"
 authors = ["Xiangyu Yin <xyin@anl.gov>"]
 channels = ["conda-forge"]
@@ -17,20 +17,35 @@ python = "3.10.*"
 pip = "*"
 
 # Core scientific stack (from conda-forge)
-numpy = "<2.0.0"
-scipy = "*"
-pandas = "*"
+numpy = "*"
 h5py = "*"
 tqdm = "*"
-matplotlib = "*"
-plotly = "*"
 
 # IMPORTANT: bring C++ runtime into the env so we don't use /lib64/libstdc++.so.6
 libstdcxx-ng = "*"
 libgcc-ng = "*"
 
 [pypi-dependencies]
-anywidget = "*"
-marimo = "*"
 torch = "*"
+
+[feature.plot.dependencies]
+matplotlib = "*"
+
+[feature.plot.pypi-dependencies]
 scienceplots = ">=2.2.0, <3"
+
+[feature.widget.pypi-dependencies]
+anywidget = "*"
+traitlets = "*"
+
+[feature.apps.dependencies]
+plotly = "*"
+pandas = "*"
+scipy = "*"
+
+[feature.apps.pypi-dependencies]
+marimo = "*"
+
+[environments]
+default = { features = ["plot", "widget", "apps"] }
+core = { features = [] }

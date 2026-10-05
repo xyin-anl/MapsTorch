@@ -47,10 +47,15 @@ POSSIBILITY OF SUCH DAMAGE.
 
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
-import scienceplots
-from matplotlib import colors as mcolors
-from matplotlib.transforms import blended_transform_factory
+try:
+    import matplotlib.pyplot as plt
+    import scienceplots
+    from matplotlib import colors as mcolors
+    from matplotlib.transforms import blended_transform_factory
+except ImportError as exc:
+    raise ImportError(
+        "Plotting requires optional dependencies: pip install 'mapstorch[plot]'"
+    ) from exc
 
 plt.style.use(["science", "notebook", "retro"])
 

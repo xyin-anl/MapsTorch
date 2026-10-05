@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mapstorch"
-version = "0.0.1"
+version = "0.0.2"
 description = "A differentiable modeling package for automating X-ray fluorescence (XRF) analysis"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Xiangyu Yin", email = "xyin@anl.gov" },
@@ -15,20 +15,19 @@ authors = [
 dependencies = [
     "h5py",
     "tqdm",
-    "numpy<2.0.0",
-    "scipy",
-    "pandas",
-    "matplotlib",
-    "anywidget",
-    "plotly",
-    "marimo",
+    "numpy",
     "torch",
-    "scienceplots>=2.2.0,<3",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+
+[project.optional-dependencies]
+plot = ["matplotlib", "scienceplots>=2.2.0,<3"]
+widget = ["anywidget", "traitlets"]
+apps = ["mapstorch[plot,widget]", "marimo", "plotly", "pandas", "scipy"]
+all = ["mapstorch[apps]"]
 
 [project.urls]
 Homepage = "https://github.com/xyin-anl/MapsTorch"

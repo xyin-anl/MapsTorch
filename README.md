@@ -19,8 +19,20 @@ See [paper](https://doi.org/10.1107/S160057752501032X) for technical details.
 
 ## Get Started
 
+Python 3.10 or newer is required. The core engine supports NumPy 2 and needs
+only NumPy, PyTorch, h5py, and tqdm:
+
+```sh
+pip install mapstorch
 ```
-pip install git+https://github.com/xyin-anl/MapsTorch.git
+
+Optional tools are available as extras:
+
+```sh
+pip install 'mapstorch[plot]'    # Matplotlib plots and SciencePlots styles
+pip install 'mapstorch[widget]'  # Notebook widgets
+pip install 'mapstorch[apps]'    # Apps and scripts, including plots and widgets
+pip install 'mapstorch[all]'     # All optional tools
 ```
 
 **Develop with Pixi**
