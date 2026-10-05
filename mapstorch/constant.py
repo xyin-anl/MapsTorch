@@ -48,7 +48,7 @@ POSSIBILITY OF SUCH DAMAGE.
 import time, csv, math
 import numpy as np
 from pathlib import Path
-from xdrlib import *
+import struct
 
 reference_directory = Path(__file__).resolve().parent / "reference"
 element_henke_filename = "henke.xdr"
@@ -197,6 +197,30 @@ def open_file_with_retry(
             time.sleep(retry_sleep)
             retry_sleep += retry_sleep_inc
     return file
+
+
+class _XDRReader:
+    """Read the big-endian 32-bit integers and floats in the Henke table."""
+
+    def __init__(self, data):
+        self.data = data
+        self.position = 0
+
+    def get_position(self):
+        return self.position
+
+    def set_position(self, position):
+        self.position = position
+
+    def unpack_int(self):
+        value = struct.unpack_from(">i", self.data, self.position)[0]
+        self.position += 4
+        return value
+
+    def unpack_floats(self, count):
+        values = struct.unpack_from(f">{count}f", self.data, self.position)
+        self.position += 4 * count
+        return list(values)
 
 
 class Henke:
@@ -808,7 +832,7 @@ class Henke:
             print("File: %s", filename)
 
         buf = file.read()
-        u = Unpacker(buf)
+        u = _XDRReader(buf)
 
         if all:
             n_elements = u.unpack_int()
@@ -824,7 +848,7 @@ class Henke:
                     expected_pos,
                 )
 
-            energies = u.unpack_farray(n_energies, u.unpack_float)
+            energies = u.unpack_floats(n_energies)
             energies = np.array(energies)
             if verbose:
                 print("energies: %s", energies)
@@ -843,8 +867,8 @@ class Henke:
                 )
 
             for i_element in range(n_elements):
-                this_f1 = u.unpack_farray(n_energies, u.unpack_float)
-                this_f2 = u.unpack_farray(n_energies, u.unpack_float)
+                this_f1 = u.unpack_floats(n_energies)
+                this_f2 = u.unpack_floats(n_energies)
                 f1[i_element, :] = this_f1
                 f2[i_element, :] = this_f2
 
@@ -879,9 +903,9 @@ class Henke:
 
             for i_element in range(n_elements):
                 this_n_extra = u.unpack_int()
-                this_extra_energies = u.unpack_farray(n_extra_energies, u.unpack_float)
-                this_extra_f1 = u.unpack_farray(n_extra_energies, u.unpack_float)
-                this_extra_f2 = u.unpack_farray(n_extra_energies, u.unpack_float)
+                this_extra_energies = u.unpack_floats(n_extra_energies)
+                this_extra_f1 = u.unpack_floats(n_extra_energies)
+                this_extra_f2 = u.unpack_floats(n_extra_energies)
                 n_extra[i_element] = this_n_extra
                 extra_energies[i_element, :] = this_extra_energies
                 extra_f1[i_element, :] = this_extra_f1
@@ -891,7 +915,7 @@ class Henke:
             n_elements = u.unpack_int()
             n_energies = u.unpack_int()
 
-            energies = u.unpack_farray(n_energies, u.unpack_float)
+            energies = u.unpack_floats(n_energies)
             energies = np.array(energies)
             if verbose:
                 print("energies: %s", energies)
@@ -899,8 +923,8 @@ class Henke:
             byte_offset = 4 + 4 + 4 * n_energies + 8 * ielement * n_energies
             u.set_position(byte_offset)
 
-            f1 = u.unpack_farray(n_energies, u.unpack_float)
-            f2 = u.unpack_farray(n_energies, u.unpack_float)
+            f1 = u.unpack_floats(n_energies)
+            f2 = u.unpack_floats(n_energies)
 
             byte_offset = 4 + 4 + 4 * n_energies + 8 * n_elements * n_energies
             u.set_position(byte_offset)
@@ -920,9 +944,9 @@ class Henke:
             u.set_position(byte_offset)
 
             n_extra = u.unpack_int()
-            this_extra_energies = u.unpack_farray(n_extra_energies, u.unpack_float)
-            this_extra_f1 = u.unpack_farray(n_extra_energies, u.unpack_float)
-            this_extra_f2 = u.unpack_farray(n_extra_energies, u.unpack_float)
+            this_extra_energies = u.unpack_floats(n_extra_energies)
+            this_extra_f1 = u.unpack_floats(n_extra_energies)
+            this_extra_f2 = u.unpack_floats(n_extra_energies)
 
             extra_energies = this_extra_energies[0:n_extra]
             extra_f1 = this_extra_f1[0:n_extra]
