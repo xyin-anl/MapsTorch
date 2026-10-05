@@ -236,7 +236,7 @@ def benchmark_build_model_basis(params, energy_range, elements, device):
     return basis, basis_names, elapsed
 
 
-def test_single_spectrum_fit(int_spec, energy_range, elements, device, n_iter=500):
+def benchmark_single_spectrum_fit(int_spec, energy_range, elements, device, n_iter=500):
     """Test single spectrum fitting (baseline comparison)."""
     print(f"\n{'-'*60}")
     print(f"Testing single spectrum fit on {device.upper()}")
@@ -271,6 +271,46 @@ def test_single_spectrum_fit(int_spec, energy_range, elements, device, n_iter=50
     print(f"  Final loss: {loss_trace[-1]:.2e}" if loss_trace else "  No loss trace")
 
     return tensors, spec_fit, elapsed
+
+
+def test_single_spectrum_fit():
+    """Recover known amplitudes through the public model and fitting pipeline."""
+    import mapstorch
+    from mapstorch import default, map as model
+
+    energy_range = (0, 1400)
+    components = ["Fe", "COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE"]
+    expected = np.array([1.0, 0.6, 0.3])  # Base-ten logarithmic amplitudes.
+    params = {
+        key: torch.tensor(value, dtype=torch.float32)
+        for key, value in default.default_param_vals.items()
+    }
+    for name, value in zip(components, expected):
+        params[name] = torch.tensor(value, dtype=torch.float32)
+    spectrum = model.model_spec(params, energy_range, elements_to_fit=["Fe"]).numpy()
+    assert spectrum.shape == (1401,)
+    assert np.isfinite(spectrum).all() and spectrum.max() > 0
+
+    fitted, prediction, background, losses = fit_spec(
+        spectrum,
+        energy_range,
+        elements_to_fit=["Fe"],
+        fitting_params=[],
+        tune_params=False,
+        init_amp=False,
+        use_snip=False,
+        optimizer="lbfgs",
+        n_iter=8,
+        progress_bar=False,
+        device="cpu",
+    )
+    assert len(losses) == 8 and np.isfinite(losses).all()
+    assert losses[-1] < losses[0]
+    np.testing.assert_allclose(
+        [fitted[name].item() for name in components], expected, rtol=0, atol=2e-4
+    )
+    np.testing.assert_allclose(prediction, spectrum, rtol=5e-4, atol=1e-5)
+    np.testing.assert_array_equal(background, np.zeros_like(spectrum))
 
 
 def main():
@@ -312,7 +352,7 @@ def main():
             print(f"Skipping {device} - not available")
             continue
 
-        params, spec_fit, elapsed = test_single_spectrum_fit(
+        params, spec_fit, elapsed = benchmark_single_spectrum_fit(
             int_spec, energy_range, elements, device, n_iter=300
         )
         results[f"single_spec_{device}"] = {"params": params, "time": elapsed}
