@@ -84,6 +84,23 @@ def _ordered_unique(items):
     return list(dict.fromkeys(items))
 
 
+# The squared-error loss is summed in counts², so on a bright spectrum gradients pass
+# 1e19 (ENERGY_QUADRATIC first) and Adam's running average of squared gradients
+# overflows float32, freezing that parameter for the rest of the fit. CUDA reaches it
+# first because its kernel squares before it scales. Adam and AdamW therefore step on
+# the loss scaled so the observed squared counts sum to ADAM_OBJECTIVE_POWER, which
+# keeps gradients far from both the overflow and Adam's eps; their steps do not
+# depend on the scale otherwise, and reported losses stay unscaled.
+ADAM_OBJECTIVE_POWER = 1e10
+
+
+def _adam_objective_scale(obs, loss, optimizer):
+    if loss != "mse" or optimizer not in ("adam", "adamw"):
+        return 1.0
+    power = float(torch.sum(obs.detach().double() ** 2))
+    return ADAM_OBJECTIVE_POWER / power if power > 0 else 1.0
+
+
 def init_elem_amps(
     elem,
     spec,
@@ -403,6 +420,8 @@ def fit_spec(
     if loss_params is None:
         loss_params = {}
 
+    objective_scale = _adam_objective_scale(int_spec_tensor, loss, optimizer)
+
     if optimizer == "adam":
         optimizer = torch.optim.Adam(opt_configs)
     elif optimizer == "adamw":
@@ -468,7 +487,7 @@ def fit_spec(
                                 perturbed_loss - loss_val
                             ) / finite_diff_epsilon
                             param.data.flatten()[i] = original_param.flatten()[i]
-                        param.grad = param_grad
+                        param.grad = param_grad * objective_scale
         else:
             loss_val, spec_fit, bkg = _calculate_loss(
                 tensors,
@@ -486,7 +505,7 @@ def fit_spec(
                 detector_type,
                 escape_factor,
             )
-            loss_val.backward()
+            (loss_val * objective_scale).backward()
         return loss_val
 
     for _ in trange(n_iter, disable=not progress_bar):
@@ -625,6 +644,8 @@ def fit_spec_batch(
     if loss_params is None:
         loss_params = {}
 
+    objective_scale = _adam_objective_scale(spec_roi, loss, optimizer)
+
     if optimizer == "adam":
         optim = torch.optim.Adam(opt_configs)
     elif optimizer == "adamw":
@@ -662,7 +683,7 @@ def fit_spec_batch(
             detector_type=detector_type,
             escape_factor=escape_factor,
         )
-        loss_val.backward()
+        (loss_val * objective_scale).backward()
         return loss_val
 
     for _ in trange(n_iter, disable=not progress_bar):
