@@ -1922,8 +1922,72 @@ def define_constants(info_elements, pileups=None, return_dict=True):
         return e_pars, s_name[1:]
 
 
-def read_constants(filename, info_elements, pileups=None, return_dict=True):
+# xraylib line codes of the L lines in the table, in its column order.
+XRAYLIB_L_LINES = {
+    "La1": "L3M5",
+    "La2": "L3M4",
+    "Lb1": "L2M4",
+    "Lb2": "L3N5",
+    "Lb3": "L1M3",
+    "Lb4": "L1M2",
+    "Lg1": "L2N4",
+    "Lg2": "L1N2",
+    "Lg3": "L1N3",
+    "Lg4": "L1O3",
+    "Ll": "L3M1",
+    "Ln": "L2M1",
+}
+
+
+def set_l_ratios_from_xraylib(row, incident_energy):
+    """Set an L family's line ratios (relative to La1) to xraylib's at the beam energy.
+
+    The table's L ratios do not depend on the beam energy, yet the L1, L2 and L3
+    subshells are ionised in proportions that do; measured on standards, the
+    table's Lb is 2.6 times too strong for La and Cs at 10-14 keV, and xraylib's
+    Kissel cross sections with cascade agree within 1-15%. `row` holds one
+    element's EnergyStruct entries; lines xraylib gives no cross section for keep
+    their table ratio.
+    """
+    import xraylib
+
+    z = xraylib.SymbolToAtomicNumber(row[0].name.split("_")[0])
+
+    def cross_section(ptype):
+        try:
+            line = getattr(xraylib, XRAYLIB_L_LINES[ptype] + "_LINE")
+            return xraylib.CS_FluorLine_Kissel_Cascade(z, line, float(incident_energy))
+        except ValueError:
+            return 0.0
+
+    ref = cross_section("La1")
+    if ref <= 0.0:
+        return
+    for s in row:
+        if s.ptype in XRAYLIB_L_LINES:
+            cs = cross_section(s.ptype)
+            if cs > 0.0:
+                s.ratio = cs / ref
+
+
+def read_constants(
+    filename, info_elements, pileups=None, return_dict=True, incident_energy=None
+):
+    """Line constants for the elements, with a settings file's adjustments.
+
+    With `incident_energy` (keV), every L family's base ratios come from xraylib
+    at that energy (set_l_ratios_from_xraylib) instead of the fixed table; the
+    file's BRANCHING_RATIO_ADJUSTMENT_L multipliers then apply on top, so
+    multipliers tuned to correct the table should be reset to 1.
+    """
     e_pars, s_name = define_constants(info_elements, pileups, False)
+
+    def xraylib_l(ii):
+        if incident_energy is not None and str(e_pars[ii, 0].name).endswith("_L"):
+            set_l_ratios_from_xraylib(e_pars[ii], incident_energy)
+
+    for ii in range(e_pars.shape[0]):
+        xraylib_l(ii)
     with open(str(filename), "rt") as f:
         for line in f:
             if ":" in line:
@@ -2015,6 +2079,7 @@ def read_constants(filename, info_elements, pileups=None, return_dict=True):
                             info_elements[j].xrf_abs_yield["ln"]
                             / info_elements[j].xrf_abs_yield["la1"]
                         )
+                        xraylib_l(ii)
                         e_pars[ii, 0].ratio *= factor_l3
                         e_pars[ii, 1].ratio *= factor_l3
                         e_pars[ii, 3].ratio *= factor_l3
