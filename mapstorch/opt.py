@@ -369,7 +369,14 @@ def fit_spec(
     lbfgs_max_iter=20,
     lbfgs_history_size=10,
     lbfgs_line_search_fn="strong_wolfe",
+    project=None,
 ):
+    """Fit one spectrum's settings and amplitudes.
+
+    `project`, when given, is called as project(tensors) without gradients after
+    every optimizer step; it may change the tensors in place, for example to keep
+    refined settings within physical limits.
+    """
     assert loss in ["mse", "l1", "poisson_nll", "poisson_deviance", "chi2"], (
         "Loss function not supported"
     )
@@ -515,11 +522,15 @@ def fit_spec(
         except RuntimeError as e:
             print(f"Optimization step failed: {e}")
             break
+        if project is not None:
+            with torch.no_grad():
+                project(tensors)
 
         if status_updator is not None:
             status_updator.update()
 
-    if spec_fit is None or bkg is None:
+    # with a projection the last step's model predates the final projected settings
+    if spec_fit is None or bkg is None or project is not None:
         with torch.no_grad():
             _, spec_fit, bkg = _calculate_loss(
                 tensors,

@@ -25,6 +25,9 @@ tqdm = "*"
 libstdcxx-ng = "*"
 libgcc-ng = "*"
 
+# beam-energy L line ratios (read_constants incident_energy)
+xraylib = "*"
+
 [pypi-dependencies]
 torch = "*"
 

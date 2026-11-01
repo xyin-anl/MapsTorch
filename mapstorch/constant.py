@@ -1939,6 +1939,14 @@ XRAYLIB_L_LINES = {
 }
 
 
+# The subshell whose vacancy each L line fills, and xraylib's code for its edge.
+_L_LINE_SUBSHELL = {
+    "La1": "L3", "La2": "L3", "Lb2": "L3", "Ll": "L3",
+    "Lb1": "L2", "Lg1": "L2", "Ln": "L2",
+    "Lb3": "L1", "Lb4": "L1", "Lg2": "L1", "Lg3": "L1", "Lg4": "L1",
+}
+
+
 def set_l_ratios_from_xraylib(row, incident_energy):
     """Set an L family's line ratios (relative to La1) to xraylib's at the beam energy.
 
@@ -1946,12 +1954,17 @@ def set_l_ratios_from_xraylib(row, incident_energy):
     subshells are ionised in proportions that do; measured on standards, the
     table's Lb is 2.6 times too strong for La and Cs at 10-14 keV, and xraylib's
     Kissel cross sections with cascade agree within 1-15%. `row` holds one
-    element's EnergyStruct entries; lines xraylib gives no cross section for keep
-    their table ratio.
+    element's EnergyStruct entries. A line whose subshell edge lies above the beam
+    energy cannot be excited and gets ratio 0; a line xraylib has no cross section
+    for, though its subshell is excited, keeps its table ratio.
     """
     import xraylib
 
     z = xraylib.SymbolToAtomicNumber(row[0].name.split("_")[0])
+    edge_energy = {
+        shell: xraylib.EdgeEnergy(z, getattr(xraylib, shell + "_SHELL"))
+        for shell in ("L1", "L2", "L3")
+    }
 
     def cross_section(ptype):
         try:
@@ -1965,21 +1978,35 @@ def set_l_ratios_from_xraylib(row, incident_energy):
         return
     for s in row:
         if s.ptype in XRAYLIB_L_LINES:
+            if float(incident_energy) <= edge_energy[_L_LINE_SUBSHELL[s.ptype]]:
+                s.ratio = 0.0
+                continue
             cs = cross_section(s.ptype)
             if cs > 0.0:
                 s.ratio = cs / ref
 
 
 def read_constants(
-    filename, info_elements, pileups=None, return_dict=True, incident_energy=None
+    filename,
+    info_elements,
+    pileups=None,
+    return_dict=True,
+    incident_energy=None,
+    keep_l_adjustments=False,
 ):
     """Line constants for the elements, with a settings file's adjustments.
 
-    With `incident_energy` (keV), every L family's base ratios come from xraylib
-    at that energy (set_l_ratios_from_xraylib) instead of the fixed table; the
-    file's BRANCHING_RATIO_ADJUSTMENT_L multipliers then apply on top, so
-    multipliers tuned to correct the table should be reset to 1.
+    With `incident_energy` (keV), every L family's ratios come from xraylib at
+    that energy (set_l_ratios_from_xraylib) instead of the fixed table. A settings
+    file's L adjustments (BRANCHING_RATIO_ADJUSTMENT_L and
+    BRANCHING_FAMILY_ADJUSTMENT_L) were tuned to correct the table, and on
+    xraylib's ratios they would correct a second time, so they are skipped with a
+    warning unless `keep_l_adjustments` is set (for multipliers measured on top of
+    xraylib's ratios).
     """
+    import warnings
+
+    skipped_l = []
     e_pars, s_name = define_constants(info_elements, pileups, False)
 
     def xraylib_l(ii):
@@ -2015,6 +2042,12 @@ def read_constants(
                         for i in range(parsdims[0]):
                             for j in range(parsdims[1]):
                                 e_pars[i, j].mu_fraction = e_pars[i, j].Ge_mu
+
+                elif tag in (
+                    "BRANCHING_FAMILY_ADJUSTMENT_L",
+                    "BRANCHING_RATIO_ADJUSTMENT_L",
+                ) and incident_energy is not None and not keep_l_adjustments:
+                    skipped_l.append(value.split(",")[0].strip())
 
                 elif tag == "BRANCHING_FAMILY_ADJUSTMENT_L":
                     temp_string = value.split(",")
@@ -2154,6 +2187,13 @@ def read_constants(
                         ii = wo[0][0]
                         e_pars[ii, 0:3].width_multi = temp
 
+    if skipped_l:
+        warnings.warn(
+            "L line ratios come from xraylib at the beam energy, so the settings "
+            "file's L adjustments for " + ", ".join(sorted(set(skipped_l)))
+            + " were not applied (keep_l_adjustments=True applies them)",
+            stacklevel=2,
+        )
     if return_dict:
         return {e_pars[i, 0].name: e_pars[i] for i in range(e_pars.shape[0])}
     else:

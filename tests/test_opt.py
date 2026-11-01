@@ -61,3 +61,48 @@ class AdamBrightSpectrumTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProjectionTests(unittest.TestCase):
+    def test_projection_holds_a_refined_setting_inside_its_limits(self):
+        """A spectrum made with the energy offset 0.05 keV above the start,
+        refined with the offset limited to +-0.01 keV, ends on the limit and the
+        returned model is the one at the projected setting.
+
+        Fails when the hook is not called after each step (the offset runs to
+        0.05) or when the returned model predates the last projection."""
+        energy_range = (50, 1400)
+        true = dict(default.default_param_vals)
+        start = true["ENERGY_OFFSET"]
+        true["ENERGY_OFFSET"] = start + 0.05
+        params = {k: torch.tensor(v, dtype=torch.float32) for k, v in true.items()}
+        for name, log_amp in [("Fe", 6.0), ("COMPTON_AMPLITUDE", 5.6), ("COHERENT_SCT_AMPLITUDE", 5.3)]:
+            params[name] = torch.tensor(log_amp)
+        spectrum = np.zeros(2048, dtype=np.float32)
+        spectrum[: energy_range[1] + 1] = model.model_spec(
+            params, (0, energy_range[1]), elements_to_fit=["Fe"]
+        ).numpy()
+
+        def project(tensors):
+            tensors["ENERGY_OFFSET"].clamp_(start - 0.01, start + 0.01)
+
+        fitted, spec_fit, _, _ = fit_spec(
+            spectrum,
+            energy_range,
+            elements_to_fit=["Fe"],
+            fitting_params=["ENERGY_OFFSET"],
+            init_param_vals=dict(default.default_param_vals),
+            init_amp=True,
+            use_snip=False,
+            loss="poisson_nll",
+            n_iter=200,
+            progress_bar=False,
+            device="cpu",
+            project=project,
+        )
+        self.assertAlmostEqual(fitted["ENERGY_OFFSET"].item(), start + 0.01, places=6)
+        with torch.no_grad():
+            expected = model.model_spec(
+                fitted, energy_range, elements_to_fit=["Fe"]
+            ).numpy()
+        np.testing.assert_allclose(spec_fit, expected, rtol=1e-4, atol=1e-3)
