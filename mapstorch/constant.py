@@ -1956,7 +1956,8 @@ def set_l_ratios_from_xraylib(row, incident_energy):
     Kissel cross sections with cascade agree within 1-15%. `row` holds one
     element's EnergyStruct entries. A line whose subshell edge lies above the beam
     energy cannot be excited and gets ratio 0; a line xraylib has no cross section
-    for, though its subshell is excited, keeps its table ratio.
+    for, though its subshell is excited, keeps its table ratio; below the L3 edge
+    the whole family is zero.
     """
     import xraylib
 
@@ -1974,13 +1975,12 @@ def set_l_ratios_from_xraylib(row, incident_energy):
             return 0.0
 
     ref = cross_section("La1")
-    if ref <= 0.0:
-        return
     for s in row:
-        if s.ptype in XRAYLIB_L_LINES:
-            if float(incident_energy) <= edge_energy[_L_LINE_SUBSHELL[s.ptype]]:
-                s.ratio = 0.0
-                continue
+        if s.ptype not in XRAYLIB_L_LINES:
+            continue
+        if float(incident_energy) <= edge_energy[_L_LINE_SUBSHELL[s.ptype]]:
+            s.ratio = 0.0
+        elif ref > 0.0:
             cs = cross_section(s.ptype)
             if cs > 0.0:
                 s.ratio = cs / ref
@@ -2010,7 +2010,10 @@ def read_constants(
     e_pars, s_name = define_constants(info_elements, pileups, False)
 
     def xraylib_l(ii):
-        if incident_energy is not None and str(e_pars[ii, 0].name).endswith("_L"):
+        # Element L families only: pile-up peaks (e.g. "La_L_La_L") carry
+        # products of two lines' ratios and keep the table's.
+        name = str(e_pars[ii, 0].name)
+        if incident_energy is not None and name.endswith("_L") and name.count("_") == 1:
             set_l_ratios_from_xraylib(e_pars[ii], incident_energy)
 
     for ii in range(e_pars.shape[0]):

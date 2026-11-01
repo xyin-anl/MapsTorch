@@ -55,6 +55,37 @@ class XraylibLineRatioTests(unittest.TestCase):
             self.assertEqual(beam[line], 0.0, line)
         self.assertGreater(beam["Lb2"], 0.1)
 
+    def test_whole_family_is_zero_below_the_l3_edge(self):
+        """At 12 keV the beam is below lead's L3 edge (13.04 keV), so no L line can
+        be excited. Fails when the family keeps the table's ratios because
+        xraylib has no L alpha1 cross section to normalise to."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "ELEMENTS_TO_FIT: Pb_L\n")
+            beam = _ratios(
+                read_constants(path, default_elem_info, incident_energy=12.0), "Pb_L"
+            )
+        self.assertTrue(beam)
+        for line, ratio in beam.items():
+            self.assertEqual(ratio, 0.0, line)
+
+    def test_l_pileups_keep_their_product_ratios(self):
+        """A pile-up peak's ratio is the product of its two lines' ratios. Fails
+        when the L-family rewrite treats "La_L_La_L" as a family and overwrites
+        its products with single-line ratios."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "ELEMENTS_TO_FIT: La_L\n")
+            table = read_constants(path, default_elem_info, pileups=["La_L_La_L"])
+            beam = read_constants(
+                path, default_elem_info, pileups=["La_L_La_L"], incident_energy=10.27
+            )
+        self.assertEqual(
+            [s.ratio for s in beam["La_L_La_L"]], [s.ratio for s in table["La_L_La_L"]]
+        )
+
     def test_settings_file_l_adjustments_are_not_applied_twice(self):
         """A settings file's L multipliers correct the table; on xraylib's ratios
         they are skipped, with a warning. Fails when iodine's L beta comes out
