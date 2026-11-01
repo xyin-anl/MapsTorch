@@ -49,6 +49,26 @@ import time, csv, math
 import numpy as np
 from pathlib import Path
 import struct
+import re
+import warnings
+
+_NUMBER_PREFIX = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+
+
+def settings_float(text):
+    """A settings-file number read as XRF-Maps reads it: the longest numeric
+    prefix (std::stod), so "0.8." is 0.8. Warns when characters are dropped and
+    raises when there is no number."""
+    s = str(text).strip()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    m = _NUMBER_PREFIX.match(s)
+    if m is None:
+        raise ValueError(f"no number in settings value {text!r}")
+    warnings.warn(f"settings value {text!r} read as {m.group()}", stacklevel=2)
+    return float(m.group())
 
 reference_directory = Path(__file__).resolve().parent / "reference"
 element_henke_filename = "henke.xdr"
@@ -2066,9 +2086,9 @@ def read_constants(
 
                     if (wo[0].size > 0) and (len(temp_string) == 4):
                         ii = wo[0][0]
-                        factor_l1 = float(temp_string[1])
-                        factor_l2 = float(temp_string[2])
-                        factor_l3 = float(temp_string[3])
+                        factor_l1 = settings_float(temp_string[1])
+                        factor_l2 = settings_float(temp_string[2])
+                        factor_l3 = settings_float(temp_string[3])
                         name = temp_string[0].strip()
                         el_names = [x.name for x in info_elements]
                         if name[:-2] in el_names:
@@ -2148,7 +2168,7 @@ def read_constants(
 
                         if len(temp_string) >= 13:
                             for jj in range(12):
-                                e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
+                                e_pars[ii, jj].ratio *= settings_float(temp_string[(jj + 1)])
 
                 elif tag == "BRANCHING_RATIO_ADJUSTMENT_K":
                     temp_string = value.split(",")
@@ -2181,17 +2201,17 @@ def read_constants(
 
                         if len(temp_string) >= 5:
                             for jj in range(4):
-                                e_pars[ii, jj].ratio *= float(temp_string[(jj + 1)])
+                                e_pars[ii, jj].ratio *= settings_float(temp_string[(jj + 1)])
 
                 elif tag == "TAIL_FRACTION_ADJUST_SI":
-                    temp = float(value)
+                    temp = settings_float(value)
                     wo = np.where(s_name == "Si")
                     if wo[0].size > 0:
                         ii = wo[0][0]
                         e_pars[ii, :].mu_fraction = temp * e_pars[ii, :].mu_fraction
 
                 elif tag == "TAIL_WIDTH_ADJUST_SI":
-                    temp = float(value)
+                    temp = settings_float(value)
                     wo = np.where(s_name == "Si")
                     if wo[0].size > 0:
                         ii = wo[0][0]

@@ -48,6 +48,7 @@ import warnings
 import h5py
 import numpy as np
 from datetime import datetime
+from mapstorch.constant import settings_float
 from mapstorch.default import (
     default_param_vals,
     param_name_map,
@@ -599,6 +600,9 @@ def parse_override_params_file(file_path):
                     parts = line.split(":", 1)
                     param = parts[0].strip()
                     value = parts[1].strip()
+                    # A tag written twice ("ELEMENTS_TO_FIT: ELEMENTS_TO_FIT: Al, ...")
+                    while value.startswith(param + ":"):
+                        value = value[len(param) + 1 :].strip()
 
                     # Handle specific parameters
                     if param == "DETECTOR_MATERIAL":
@@ -612,9 +616,9 @@ def parse_override_params_file(file_path):
                             e.strip() for e in value.split(",") if e.strip()
                         ]
                     elif param == "SI_ESCAPE_FACTOR":
-                        si_escape_factor = float(value)
+                        si_escape_factor = settings_float(value)
                     elif param == "GE_ESCAPE_FACTOR":
-                        ge_escape_factor = float(value)
+                        ge_escape_factor = settings_float(value)
                     elif param == "SI_ESCAPE_ENABLE":
                         si_escape_enable = int(value)
                     elif param == "GE_ESCAPE_ENABLE":
@@ -625,7 +629,7 @@ def parse_override_params_file(file_path):
                         internal_param = param_keys[param]
                         try:
                             # Convert to float
-                            params[internal_param] = float(value)
+                            params[internal_param] = settings_float(value)
                         except ValueError:
                             # Skip if conversion fails
                             pass
