@@ -1509,7 +1509,7 @@ def binding_threshold_for_line(e_info, ptype="", shell_hint=""):
             key = "L1"
         elif ptype in ["Lb1", "Lg1", "Ln"]:
             key = "L2"
-        else:
+        else:  # La1, La2, Lb2, Lb6, Ll
             key = "L3"
         return float(e_info.bindingE.get(key, 0.0))
     if shell == "M":
@@ -1942,7 +1942,9 @@ def define_constants(info_elements, pileups=None, return_dict=True):
         return e_pars, s_name[1:]
 
 
-# xraylib line codes of the L lines in the table, in its column order.
+# xraylib line codes of the L lines in the table, in its column order, then of
+# Lb6, which is not in the table and is appended to each L family by
+# read_constants when the ratios come from xraylib.
 XRAYLIB_L_LINES = {
     "La1": "L3M5",
     "La2": "L3M4",
@@ -1956,12 +1958,13 @@ XRAYLIB_L_LINES = {
     "Lg4": "L1O3",
     "Ll": "L3M1",
     "Ln": "L2M1",
+    "Lb6": "L3N1",
 }
 
 
 # The subshell whose vacancy each L line fills, and xraylib's code for its edge.
 _L_LINE_SUBSHELL = {
-    "La1": "L3", "La2": "L3", "Lb2": "L3", "Ll": "L3",
+    "La1": "L3", "La2": "L3", "Lb2": "L3", "Ll": "L3", "Lb6": "L3",
     "Lb1": "L2", "Lg1": "L2", "Ln": "L2",
     "Lb3": "L1", "Lb4": "L1", "Lg2": "L1", "Lg3": "L1", "Lg4": "L1",
 }
@@ -2013,6 +2016,32 @@ def set_l_ratios_from_xraylib(row, incident_energy):
                 s.ratio = cs / ref
 
 
+def l3n1_line(name, incident_energy):
+    """Energy (keV) and ratio to La1 of an L family's L3-N1 (Lb6) line, from xraylib.
+
+    The table has no column for Lb6, about 1.5% of La1 for lead, yet bright lead
+    standards leave a residual at its energy. None when the beam does not reach
+    the L3 edge or xraylib has no data for the line.
+    """
+    import xraylib
+
+    e0 = float(incident_energy)
+    try:
+        z = xraylib.SymbolToAtomicNumber(name.split("_")[0])
+        if e0 <= xraylib.EdgeEnergy(z, xraylib.L3_SHELL):
+            return None
+        line = getattr(xraylib, XRAYLIB_L_LINES["Lb6"] + "_LINE")
+        ref = getattr(xraylib, XRAYLIB_L_LINES["La1"] + "_LINE")
+        energy = xraylib.LineEnergy(z, line)
+        cs = xraylib.CS_FluorLine_Kissel_Cascade(z, line, e0)
+        cs_ref = xraylib.CS_FluorLine_Kissel_Cascade(z, ref, e0)
+    except ValueError:
+        return None
+    if energy <= 0.0 or cs <= 0.0 or cs_ref <= 0.0:
+        return None
+    return energy, cs / cs_ref
+
+
 def read_constants(
     filename,
     info_elements,
@@ -2030,17 +2059,24 @@ def read_constants(
     xraylib's ratios they would correct a second time, so they are skipped with a
     warning unless `keep_l_adjustments` is set (for multipliers measured on top of
     xraylib's ratios).
+
+    With `incident_energy`, each element L family excited above its L3 edge also
+    gets an Lb6 (L3-N1) line after its 12 table columns (l3n1_line), so its row
+    has 13 entries; with return_dict=False the rows are then returned as a list.
     """
     import warnings
 
     skipped_l = []
+    ge_detector = False
     e_pars, s_name = define_constants(info_elements, pileups, False)
 
-    def xraylib_l(ii):
+    def is_l_family(name):
         # Element L families only: pile-up peaks (e.g. "La_L_La_L") carry
         # products of two lines' ratios and keep the table's.
-        name = str(e_pars[ii, 0].name)
-        if incident_energy is not None and name.endswith("_L") and name.count("_") == 1:
+        return name.endswith("_L") and name.count("_") == 1
+
+    def xraylib_l(ii):
+        if incident_energy is not None and is_l_family(str(e_pars[ii, 0].name)):
             set_l_ratios_from_xraylib(e_pars[ii], incident_energy)
 
     for ii in range(e_pars.shape[0]):
@@ -2063,6 +2099,7 @@ def read_constants(
 
                 elif tag == "DETECTOR_MATERIAL":
                     temp = int(value)
+                    ge_detector = temp != 1
                     parsdims = e_pars.shape
                     if temp == 1:
                         for i in range(parsdims[0]):
@@ -2224,6 +2261,35 @@ def read_constants(
             + " were not applied (keep_l_adjustments=True applies them)",
             stacklevel=2,
         )
+    if incident_energy is not None:
+        lb6 = []
+        for ii in range(e_pars.shape[0]):
+            name = str(e_pars[ii, 0].name)
+            line = l3n1_line(name, incident_energy) if is_l_family(name) else None
+            if line is not None:
+                s = EnergyStruct()
+                s.name = name
+                s.energy, s.ratio = line
+                s.type = 3
+                s.ptype = "Lb6"
+                lb6.append((ii, s))
+        # Detector absorption as the table's lines get theirs: the same
+        # calculation, in a table row of its own, then the settings file's
+        # detector material (the file's other absorption scaling is Si K only).
+        mu_pars = np.empty((len(lb6), 12), dtype=object)
+        for i in range(len(lb6)):
+            for j in range(12):
+                mu_pars[i, j] = EnergyStruct()
+            mu_pars[i, 0] = lb6[i][1]
+        calculate_mu_fractions(mu_pars, info_elements, len(lb6))
+        rows = list(e_pars)
+        for ii, s in lb6:
+            if ge_detector:
+                s.mu_fraction = s.Ge_mu
+            rows[ii] = np.append(rows[ii], np.array([s], dtype=object))
+        if return_dict:
+            return {row[0].name: row for row in rows}
+        return rows, s_name
     if return_dict:
         return {e_pars[i, 0].name: e_pars[i] for i in range(e_pars.shape[0])}
     else:

@@ -448,6 +448,7 @@ def model_elem_spec(
                 "Lb2",
                 "Lb3",
                 "Lb4",
+                "Lb6",
                 "Lg1",
                 "Lg2",
                 "Lg3",
