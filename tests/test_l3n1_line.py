@@ -7,7 +7,7 @@ from unittest import mock
 import numpy as np
 import torch
 
-from mapstorch.constant import read_constants
+from mapstorch.constant import binding_threshold_for_line, read_constants
 from mapstorch.default import default_elem_info, default_param_vals
 from mapstorch.map import model_elem_spec
 
@@ -35,7 +35,11 @@ def _constants(**kwargs):
 def _spectrum(e_consts, element):
     params = {k: torch.tensor(v, dtype=torch.float64) for k, v in default_param_vals.items()}
     params["COHERENT_SCT_ENERGY"] = torch.tensor(16.5, dtype=torch.float64)
+    # Nonzero step and tail slopes, so the lines' detector absorption shows.
     params["F_TAIL_OFFSET"] = torch.tensor(0.05, dtype=torch.float64)
+    params["F_TAIL_LINEAR"] = torch.tensor(1e-4, dtype=torch.float64)
+    params["F_STEP_OFFSET"] = torch.tensor(1e-4, dtype=torch.float64)
+    params["F_STEP_LINEAR"] = torch.tensor(1e-5, dtype=torch.float64)
     params[element] = torch.tensor(3.0, dtype=torch.float64)
     ev = 0.01 * torch.arange(100, 2000, dtype=torch.float64)
     return model_elem_spec(params, element, ev, e_consts=e_consts, elem_info=default_elem_info)
@@ -67,13 +71,18 @@ class L3N1LineTests(unittest.TestCase):
     def test_lb6_mis_built_as_lb4_doubles_lb4(self):
         """With Lb4's energy and ratio, the appended L3-N1 line is a second copy
         of Lb4, so the model equals the one with Lb4's ratio doubled. Fails when
-        the appended line's detector absorption is not computed at its energy,
-        ignores DETECTOR_MATERIAL, or misses Lb4's tail or binding threshold."""
+        the appended line's detector absorption is not computed at its energy or
+        ignores DETECTOR_MATERIAL, or when the line gets no tail. The beam must
+        clear the L1 edge for Lb4, so the L3 threshold is checked directly."""
         beam = 16.5  # above lead's L1 edge (15.86 keV), so Lb4 is excited
         e_consts = _constants(incident_energy=beam)
         pb = {s.ptype: s for s in e_consts["Pb_L"]}
         self.assertAlmostEqual(pb["Lb6"].energy, 12.14, places=1)
         self.assertTrue(0.01 < pb["Lb6"].ratio < 0.02, pb["Lb6"].ratio)
+        pb_info = next(e for e in default_elem_info if e.name == "Pb")
+        self.assertEqual(
+            binding_threshold_for_line(pb_info, "Lb6"), pb_info.bindingE["L3"]
+        )
 
         lb4 = {
             name: next((s.energy, s.ratio) for s in row if s.ptype == "Lb4")
