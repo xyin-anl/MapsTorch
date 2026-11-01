@@ -375,7 +375,8 @@ def fit_spec(
 
     `project`, when given, is called as project(tensors) without gradients after
     every optimizer step; it may change the tensors in place, for example to keep
-    refined settings within physical limits.
+    refined settings within physical limits. L-BFGS evaluates points inside a
+    step that the projection has not seen; the returned settings are projected.
     """
     assert loss in ["mse", "l1", "poisson_nll", "poisson_deviance", "chi2"], (
         "Loss function not supported"
@@ -516,15 +517,19 @@ def fit_spec(
         return loss_val
 
     for _ in trange(n_iter, disable=not progress_bar):
+        failed = None
         try:
             loss_val = optimizer.step(closure)
             loss_trace.append(loss_val.item())
         except RuntimeError as e:
-            print(f"Optimization step failed: {e}")
-            break
+            failed = e
+        # a failed step may still have moved the settings (an L-BFGS line search)
         if project is not None:
             with torch.no_grad():
                 project(tensors)
+        if failed is not None:
+            print(f"Optimization step failed: {failed}")
+            break
 
         if status_updator is not None:
             status_updator.update()

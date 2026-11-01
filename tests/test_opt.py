@@ -69,8 +69,8 @@ class ProjectionTests(unittest.TestCase):
         refined with the offset limited to +-0.01 keV, ends on the limit and the
         returned model is the one at the projected setting.
 
-        Fails when the hook is not called after each step (the offset runs to
-        0.05) or when the returned model predates the last projection."""
+        Fails when the hook is not called (the offset runs to 0.05) or the
+        returned model is far from the one at the projected setting."""
         energy_range = (50, 1400)
         true = dict(default.default_param_vals)
         start = true["ENERGY_OFFSET"]

@@ -1975,6 +1975,13 @@ def set_l_ratios_from_xraylib(row, incident_energy):
             return 0.0
 
     ref = cross_section("La1")
+    if ref <= 0.0 and float(incident_energy) > edge_energy["L3"]:
+        import warnings
+
+        warnings.warn(
+            f"xraylib has no L alpha1 cross section for {row[0].name} at "
+            f"{float(incident_energy):g} keV; its excited L lines keep the table's ratios"
+        )
     for s in row:
         if s.ptype not in XRAYLIB_L_LINES:
             continue
