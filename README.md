@@ -77,6 +77,31 @@ def create_dataset(
     """
 ```
 
+## Line Ratios
+
+Each element's lines enter the model with fixed ratios to its strongest line. By default these come
+from the built-in line table, the one XRF-Maps uses, times the multipliers in the settings file
+(`BRANCHING_RATIO_ADJUSTMENT_K`, `_L`, `_M` and `BRANCHING_FAMILY_ADJUSTMENT_L`), as XRF-Maps
+applies them. The table's L-line ratios can be far from measured ones. To take every L family's
+ratios from xraylib at the beam energy instead, pass the energy to `read_constants`:
+
+```python
+from mapstorch.constant import read_constants
+from mapstorch.default import default_elem_info
+
+e_consts = read_constants("maps_fit_parameters_override.txt", default_elem_info, incident_energy=13.6)
+```
+
+The settings file's L multipliers were tuned against the table, so they are skipped on xraylib's
+ratios (with a warning) unless `keep_l_adjustments=True`; K and M lines keep the table and the
+multipliers. Lines the beam cannot excite get ratio 0, and each excited L family also gets the
+L3-N1 (Lb6) line.
+
+To reproduce a MAPS fit, use the settings MAPS used. XRF-Maps records them in the analysed file
+(`MAPS/Fit_Parameters_Override`), but some versions record no line-ratio group there; those fits
+used the multipliers in the folder's `maps_fit_parameters_override.txt`, which then belong in the
+settings you pass.
+
 ## Interactive Apps
 
 We provide marimo notebooks in the `apps` folder that can be run as web apps (download the notebooks and run them in a Python environment with `mapstorch` installed):

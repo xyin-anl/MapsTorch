@@ -2165,33 +2165,33 @@ def read_constants(
                             )
                             e_pars[ii, 8].ratio = (
                                 info_elements[j].xrf_abs_yield["lg3"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 9].ratio = (
-                            info_elements[j].xrf_abs_yield["lg4"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 10].ratio = (
-                            info_elements[j].xrf_abs_yield["ll"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        e_pars[ii, 11].ratio = (
-                            info_elements[j].xrf_abs_yield["ln"]
-                            / info_elements[j].xrf_abs_yield["la1"]
-                        )
-                        xraylib_l(ii)
-                        e_pars[ii, 0].ratio *= factor_l3
-                        e_pars[ii, 1].ratio *= factor_l3
-                        e_pars[ii, 3].ratio *= factor_l3
-                        e_pars[ii, 10].ratio *= factor_l3
-                        e_pars[ii, 2].ratio *= factor_l2
-                        e_pars[ii, 6].ratio *= factor_l2
-                        e_pars[ii, 11].ratio *= factor_l2
-                        e_pars[ii, 4].ratio *= factor_l1
-                        e_pars[ii, 5].ratio *= factor_l1
-                        e_pars[ii, 7].ratio *= factor_l1
-                        e_pars[ii, 8].ratio *= factor_l1
-                        e_pars[ii, 9].ratio *= factor_l1
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 9].ratio = (
+                                info_elements[j].xrf_abs_yield["lg4"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 10].ratio = (
+                                info_elements[j].xrf_abs_yield["ll"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            e_pars[ii, 11].ratio = (
+                                info_elements[j].xrf_abs_yield["ln"]
+                                / info_elements[j].xrf_abs_yield["la1"]
+                            )
+                            xraylib_l(ii)
+                            e_pars[ii, 0].ratio *= factor_l3
+                            e_pars[ii, 1].ratio *= factor_l3
+                            e_pars[ii, 3].ratio *= factor_l3
+                            e_pars[ii, 10].ratio *= factor_l3
+                            e_pars[ii, 2].ratio *= factor_l2
+                            e_pars[ii, 6].ratio *= factor_l2
+                            e_pars[ii, 11].ratio *= factor_l2
+                            e_pars[ii, 4].ratio *= factor_l1
+                            e_pars[ii, 5].ratio *= factor_l1
+                            e_pars[ii, 7].ratio *= factor_l1
+                            e_pars[ii, 8].ratio *= factor_l1
+                            e_pars[ii, 9].ratio *= factor_l1
 
                 elif tag == "BRANCHING_RATIO_ADJUSTMENT_L":
                     temp_string = value.split(",")
