@@ -187,6 +187,9 @@ lele = [
     "Br_L",
     "Kr_L",
     "Rb_L",
+    "Ga_L",
+    "Ge_L",
+    "Nb_L",
 ]
 
 mele = ["Au_M", "Pb_M", "U_M", "Pt_M", "Th_M", "Hf_M", "W_M", "Os_M", "Hg_M"]

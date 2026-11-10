@@ -40,6 +40,18 @@ class XraylibLineRatioTests(unittest.TestCase):
         self.assertGreater(lb_beam, 0.6)
         self.assertLess(lb_beam, 0.9)
 
+    def test_niobium_l_family_exists(self):
+        """XRF-Maps fits Nb L (La1 2.166 keV), as on a 7 keV 2-ID-D scan whose settings list it; fails
+        when MapsTorch has no Nb L family and a fit drops it, leaving that peak to P and S."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "ELEMENTS_TO_FIT: P, Nb_L\n")
+            beam = read_constants(path, default_elem_info, incident_energy=7.0)
+        la1 = next(s for s in beam["Nb_L"] if s.ptype == "La1")
+        self.assertAlmostEqual(la1.energy, 2.166, delta=0.005)
+        self.assertGreater(_ratios(beam, "Nb_L")["Lb1"], 0.1)
+
     def test_lines_above_the_beam_energy_are_zero(self):
         """At 13.5 keV only lead's L3 subshell is ionised (L2 edge 15.2 keV), so
         every L1 and L2 line has ratio 0. Fails when a line xraylib gives no cross
