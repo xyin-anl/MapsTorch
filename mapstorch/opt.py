@@ -774,6 +774,8 @@ def solve_mca_amplitudes(
         ridge_lambda: L2 regularization for ridge solve (stabilizes nearly-collinear bases).
         nonneg: If True, clamp negative amplitudes to 0 (simple projection).
         nnls_max_iter: Max PGD iterations when amp_method="nnls_pgd".
+            Unregularized NNLS keeps XRF-Maps' initial value of 0.5 in numerically
+            unconstrained directions and warm-starts the identifiable amplitudes.
         nnls_step: Optional fixed PGD step size; if None uses 1 / max_eig(BB^T + λI).
         nnls_tol: Optional relative convergence tolerance (0 disables early stopping).
         return_log10: If True, return log10 amplitudes (matches existing parameterization).
@@ -851,6 +853,17 @@ def solve_mca_amplitudes(
         gram = basis @ basis.T
         system = gram + reg * eye
         if amp_method == "nnls_pgd":
+            if reg == 0.0:
+                # Keep the finite XRF-Maps start in the numerical null space.
+                # Double precision avoids contaminating tiny columns with
+                # eigenvector roundoff; rank still reflects the float32 input.
+                system_double = system.to(torch.float64)
+                system_pinv = torch.linalg.pinv(
+                    system_double,
+                    rtol=n_comp * torch.finfo(system.dtype).eps,
+                    hermitian=True,
+                )
+                initial_ybt = 0.5 * system_double.sum(dim=0)
             if nnls_step is None:
                 # system is symmetric PSD; use max eigenvalue as Lipschitz constant.
                 with torch.no_grad():
@@ -894,11 +907,16 @@ def solve_mca_amplitudes(
             a = torch.linalg.solve(system, ybt.T).T
         elif amp_method == "nnls_pgd":
             ybt = y @ basis.T
-            # Warm start from the unconstrained ridge solution when possible.
-            try:
-                a = torch.linalg.solve(system, ybt.T).T
-            except RuntimeError:
-                a = torch.zeros((y.shape[0], n_comp), device=device, dtype=torch.float32)
+            if reg == 0.0:
+                a = (
+                    0.5 + (ybt.to(torch.float64) - initial_ybt) @ system_pinv
+                ).to(torch.float32)
+            else:
+                # Keep the ridge warm start when regularization is requested.
+                try:
+                    a = torch.linalg.solve(system, ybt.T).T
+                except RuntimeError:
+                    a = torch.zeros((y.shape[0], n_comp), device=device, dtype=torch.float32)
             a = torch.clamp(a, min=0.0)
 
             if nnls_tol and float(nnls_tol) > 0:
