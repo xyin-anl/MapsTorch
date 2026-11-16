@@ -855,15 +855,18 @@ def solve_mca_amplitudes(
         if amp_method == "nnls_pgd":
             if reg == 0.0:
                 # Keep the finite XRF-Maps start in the numerical null space.
-                # Double precision avoids contaminating tiny columns with
-                # eigenvector roundoff; rank still reflects the float32 input.
-                system_double = system.to(torch.float64)
+                # The small K x K pseudoinverse is taken in double precision on
+                # the CPU (some devices have no float64), so eigenvector roundoff
+                # does not contaminate tiny columns; rank reflects the float32 input.
+                system_double = system.detach().to("cpu", torch.float64)
                 system_pinv = torch.linalg.pinv(
                     system_double,
                     rtol=n_comp * torch.finfo(system.dtype).eps,
                     hermitian=True,
+                ).to(device=device, dtype=torch.float32)
+                initial_ybt = (0.5 * system_double.sum(dim=0)).to(
+                    device=device, dtype=torch.float32
                 )
-                initial_ybt = 0.5 * system_double.sum(dim=0)
             if nnls_step is None:
                 # system is symmetric PSD; use max eigenvalue as Lipschitz constant.
                 with torch.no_grad():
@@ -908,9 +911,7 @@ def solve_mca_amplitudes(
         elif amp_method == "nnls_pgd":
             ybt = y @ basis.T
             if reg == 0.0:
-                a = (
-                    0.5 + (ybt.to(torch.float64) - initial_ybt) @ system_pinv
-                ).to(torch.float32)
+                a = 0.5 + (ybt - initial_ybt) @ system_pinv
             else:
                 # Keep the ridge warm start when regularization is requested.
                 try:
