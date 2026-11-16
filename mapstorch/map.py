@@ -176,7 +176,79 @@ def compton_peak(params, ev, gain, use_step=True, use_tail=False):
     return counts
 
 
-def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
+# The detector element and its Ka energy (keV), whose fluorescence escapes.
+_ESCAPE_LINE = {"Si": ("Si", 1.73998), "Ge": ("Ge", 9.886)}
+_ESCAPE_TABLES = {}
+
+
+def _photoabsorption(name, energy_kev, elem_info):
+    """Mass photoabsorption coefficient (cm^2/g) of element `name` from the Henke f2 table,
+    interpolated log-log as calculate_mu_fractions does."""
+    import numpy as np
+    from mapstorch.constant import AVOGADRO, HC_ANGSTROMS, RE, henkedata
+
+    info = next(e for e in elem_info if e.name == name)
+    e_tab, _, f2_tab, _, _, _ = henkedata.extra(ielement=info.z - 1)
+    keep = (e_tab > 0) & (np.abs(f2_tab) > 0)
+    e_tab, f2_tab = e_tab[keep], np.abs(f2_tab[keep])
+    e_ev = np.asarray(energy_kev, dtype=np.float64) * 1000.0
+    f2 = np.exp(np.interp(np.log(e_ev), np.log(e_tab), np.log(f2_tab)))
+    wavelength_cm = HC_ANGSTROMS / e_ev * 1.0e-8
+    return 2.0 * RE * wavelength_cm * f2 * AVOGADRO / info.mass
+
+
+def escape_probability(energy, detector_type="Si", elem_info=default_elem_info):
+    """Fraction of the photons of energy `energy` (keV) absorbed in the detector whose K
+    fluorescence leaves through the entrance face, so that they are counted 1.74 keV (Si) lower.
+
+    Reed and Ware (1972), semi-infinite detector, normal incidence:
+        P(E) = w_K / 2 * (1 - 1/r_K) * [1 - (mu_K / mu_E) * ln(1 + mu_E / mu_K)]
+    above the detector's K edge and 0 below it, with w_K its K fluorescence yield, r_K its K
+    edge jump ratio, and mu_E, mu_K its photoabsorption at E and at its own Ka energy. For a
+    Si detector P is about 0.9 % at Ca Ka (3.69 keV) and 0.09 % at 10.5 keV.
+
+    Accepts a float, a numpy array or a torch tensor and returns the same kind.
+    """
+    import numpy as np
+
+    if detector_type not in _ESCAPE_LINE:
+        raise ValueError(f"no escape physics for detector type {detector_type!r}")
+    table = _ESCAPE_TABLES.get(detector_type)
+    if table is None:
+        name, e_ka = _ESCAPE_LINE[detector_type]
+        info = next(e for e in elem_info if e.name == name)
+        edge = info.bindingE["K"]
+        grid = np.geomspace(edge * (1 + 1e-6), 200.0, 4000)
+        mu_e = _photoabsorption(name, grid, elem_info)
+        mu_k = float(_photoabsorption(name, e_ka, elem_info))
+        x = mu_k / mu_e
+        prob = 0.5 * info.yieldD["k"] * (1.0 - 1.0 / info.jump["K"]) * (1.0 - x * np.log1p(1.0 / x))
+        table = (edge, np.log(grid), prob)
+        _ESCAPE_TABLES[detector_type] = table
+    edge, log_grid, prob = table
+
+    def on_grid(e):
+        e = np.asarray(e, dtype=np.float64)
+        out = np.interp(np.log(np.clip(e, 1e-3, None)), log_grid, prob)
+        return np.where(e > edge, out, 0.0)
+
+    if isinstance(energy, torch.Tensor):
+        values = on_grid(energy.detach().cpu().numpy())
+        return torch.as_tensor(values, dtype=energy.dtype, device=energy.device)
+    values = on_grid(energy)
+    return float(values) if np.ndim(values) == 0 else values
+
+
+def escape_peak(spectra, ev, escape_factor, device, detector_type="Si", escape_model="constant"):
+    """Escape copies of `spectra`, each channel moved down by the detector's Ka energy.
+
+    escape_model "constant" (XRF-Maps' settings): every peak loses the same fraction,
+    `escape_factor`, at every energy. "physical": the fraction follows the detector's physics,
+    `escape_factor` * escape_probability(E), so 1.0 is the physical strength (about tenfold
+    weaker at 10.5 keV than at 3.7 keV in Si).
+    """
+    if escape_model not in ("constant", "physical"):
+        raise ValueError(f"escape_model must be 'constant' or 'physical', not {escape_model!r}")
     if detector_type == "Si":
         # Approximate Si Kα1 energy (keV)
         detector_escape_E = 1.73998
@@ -213,7 +285,10 @@ def escape_peak(spectra, ev, escape_factor, device, detector_type="Si"):
     idx = base + bins_exp
     mask = idx < n_ch
     idx_safe = torch.clamp(idx, 0, n_ch - 1)
-    shifted = torch.gather(spectra, -1, idx_safe) * escape_factor
+    source = spectra
+    if escape_model == "physical":
+        source = spectra * escape_probability(ev, detector_type).to(device=spectra.device, dtype=spectra.dtype)
+    shifted = torch.gather(source, -1, idx_safe) * escape_factor
 
     out = shifted * mask.to(shifted.dtype)
     if valid.ndim > 0:
@@ -238,6 +313,7 @@ def build_model_basis(
     elem_info=default_elem_info,
     detector_type="Si",
     escape_factor=0.0,
+    escape_model="constant",
     verbose=False,
 ):
     """Build a linear basis (K, n_channels) for fitting per-spectrum amplitudes.
@@ -250,6 +326,7 @@ def build_model_basis(
         - Energy/channel axis is the last dimension of the returned basis.
         - Scatter components (Compton + elastic) are optionally appended.
         - Escape peaks are incorporated as a linear operator when `escape_factor > 0`.
+          `escape_model` ("constant" or "physical") is as in `escape_peak`.
     """
     if energy_range is None or len(energy_range) != 2:
         raise ValueError("energy_range must be a (start, stop) tuple of channel indices")
@@ -314,7 +391,7 @@ def build_model_basis(
     basis = torch.stack(basis_specs, dim=0)
     if escape_factor > 0.0:
         with torch.no_grad():
-            basis = basis + escape_peak(basis, ev, escape_factor, device, detector_type)
+            basis = basis + escape_peak(basis, ev, escape_factor, device, detector_type, escape_model)
     return basis, basis_names
 
 
@@ -482,6 +559,7 @@ def model_spec(
     elem_info=default_elem_info,
     detector_type="Si", # "Si" or "Ge"
     escape_factor=0.0,
+    escape_model="constant",  # "constant" or "physical", as in escape_peak
 ):
     # Determine batch shape (if any) from provided parameters. Batched parameters are
     # expected to be shaped like `batch_shape` or `batch_shape + (1,)`.
@@ -548,6 +626,6 @@ def model_spec(
         with torch.no_grad():
             # Escape reindexes channels via round/gather, so we keep it outside the
             # autograd path until a differentiable surrogate is introduced.
-            escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type)
+            escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type, escape_model)
             agr_spec.add_(escape_spec)
     return agr_spec

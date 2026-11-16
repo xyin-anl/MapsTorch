@@ -365,6 +365,7 @@ def fit_spec(
     elem_info=default_elem_info,
     detector_type="Si", # "Si" or "Ge"
     escape_factor=0.0,
+    escape_model="constant",
     lbfgs_lr=1.0,
     lbfgs_max_iter=20,
     lbfgs_history_size=10,
@@ -468,6 +469,7 @@ def fit_spec(
                     elem_info,
                     detector_type,
                     escape_factor,
+                    escape_model,
                 )
                 for param_name, param in tensors.items():
                     if param.requires_grad:
@@ -490,6 +492,7 @@ def fit_spec(
                                 elem_info,
                                 detector_type,
                                 escape_factor,
+                                escape_model,
                             )
                             param_grad.flatten()[i] = (
                                 perturbed_loss - loss_val
@@ -512,6 +515,7 @@ def fit_spec(
                 elem_info,
                 detector_type,
                 escape_factor,
+                escape_model,
             )
             (loss_val * objective_scale).backward()
         return loss_val
@@ -552,6 +556,7 @@ def fit_spec(
                 elem_info,
                 detector_type,
                 escape_factor,
+                escape_model,
             )
 
     return (tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_trace)
@@ -582,6 +587,7 @@ def fit_spec_batch(
     elem_info=default_elem_info,
     detector_type="Si",
     escape_factor=0.0,
+    escape_model="constant",
     energy_dim=-1,
     lbfgs_lr=1.0,
     lbfgs_max_iter=20,
@@ -698,6 +704,7 @@ def fit_spec_batch(
             elem_info=elem_info,
             detector_type=detector_type,
             escape_factor=escape_factor,
+            escape_model=escape_model,
         )
         (loss_val * objective_scale).backward()
         return loss_val
@@ -730,6 +737,7 @@ def fit_spec_batch(
                 elem_info=elem_info,
                 detector_type=detector_type,
                 escape_factor=escape_factor,
+                escape_model=escape_model,
             )
 
     return (tensors, spec_fit.detach().cpu().numpy(), bkg.detach().cpu().numpy(), loss_trace)
@@ -757,6 +765,7 @@ def solve_mca_amplitudes(
     elem_info=default_elem_info,
     detector_type="Si",
     escape_factor=0.0,
+    escape_model="constant",
     progress_bar=True,
     verbose=False,
 ):
@@ -836,6 +845,7 @@ def solve_mca_amplitudes(
         elem_info=elem_info,
         detector_type=detector_type,
         escape_factor=escape_factor,
+        escape_model=escape_model,
         verbose=verbose,
     )
     basis = basis.to(device=device, dtype=torch.float32)
@@ -982,6 +992,7 @@ def fit_mca_arr(
     elem_info=default_elem_info,
     detector_type="Si",
     escape_factor=0.0,
+    escape_model="constant",
     progress_bar=True,
     verbose=False,
 ):
@@ -1026,6 +1037,7 @@ def fit_mca_arr(
         elem_info=elem_info,
         detector_type=detector_type,
         escape_factor=escape_factor,
+        escape_model=escape_model,
     )
 
     amp_maps, amp_names = solve_mca_amplitudes(
@@ -1048,6 +1060,7 @@ def fit_mca_arr(
         elem_info=elem_info,
         detector_type=detector_type,
         escape_factor=escape_factor,
+        escape_model=escape_model,
         progress_bar=progress_bar,
         verbose=verbose,
     )
@@ -1070,6 +1083,7 @@ def _calculate_loss(
     elem_info,
     detector_type,
     escape_factor,
+    escape_model="constant",
 ):
     use_full_spectrum_snip = _resolve_bool_param(
         tensors.get("SNIP_USE_FULL_SPECTRUM", 1.0), default=True
@@ -1104,6 +1118,7 @@ def _calculate_loss(
         elem_info=elem_info,
         detector_type=detector_type,
         escape_factor=escape_factor,
+        escape_model=escape_model,
     )
 
     if loss_params is None:
