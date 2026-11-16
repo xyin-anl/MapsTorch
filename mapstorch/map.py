@@ -181,71 +181,91 @@ _ESCAPE_LINE = {"Si": ("Si", 1.73998), "Ge": ("Ge", 9.886)}
 _ESCAPE_TABLES = {}
 
 
-def _photoabsorption(name, energy_kev, elem_info):
-    """Mass photoabsorption coefficient (cm^2/g) of element `name` from the Henke f2 table,
-    interpolated log-log as calculate_mu_fractions does."""
+def _photoabsorption(info, energy_kev, branch):
+    """Mass photoabsorption coefficient (cm^2/g) of element `info` from the Henke f2 table,
+    interpolated log-log (as calculate_mu_fractions does) on one side of its K edge only, `branch`
+    "above" or "below", so that no value interpolates across the jump. Beyond the table's last
+    point f2 follows the line through its last two points (log-log)."""
     import numpy as np
     from mapstorch.constant import AVOGADRO, HC_ANGSTROMS, RE, henkedata
 
-    info = next(e for e in elem_info if e.name == name)
+    edge_ev = info.bindingE["K"] * 1000.0
     e_tab, _, f2_tab, _, _, _ = henkedata.extra(ielement=info.z - 1)
-    keep = (e_tab > 0) & (np.abs(f2_tab) > 0)
-    e_tab, f2_tab = e_tab[keep], np.abs(f2_tab[keep])
+    side = e_tab > edge_ev if branch == "above" else e_tab < edge_ev
+    keep = (e_tab > 0) & (np.abs(f2_tab) > 0) & side
+    order = np.argsort(e_tab[keep], kind="stable")
+    le = np.log(e_tab[keep][order])
+    lf = np.log(np.abs(f2_tab[keep][order]))
     e_ev = np.asarray(energy_kev, dtype=np.float64) * 1000.0
-    f2 = np.exp(np.interp(np.log(e_ev), np.log(e_tab), np.log(f2_tab)))
+    x = np.log(e_ev)
+    slope = (lf[-1] - lf[-2]) / (le[-1] - le[-2])
+    f2 = np.exp(np.where(x > le[-1], lf[-1] + slope * (x - le[-1]), np.interp(x, le, lf)))
     wavelength_cm = HC_ANGSTROMS / e_ev * 1.0e-8
     return 2.0 * RE * wavelength_cm * f2 * AVOGADRO / info.mass
 
 
 def escape_probability(energy, detector_type="Si", elem_info=default_elem_info):
     """Fraction of the photons of energy `energy` (keV) absorbed in the detector whose K
-    fluorescence leaves through the entrance face, so that they are counted 1.74 keV (Si) lower.
+    fluorescence leaves through the entrance face, so that they are counted at E minus the
+    detector's Ka energy (1.74 keV for Si).
 
     Reed and Ware (1972), semi-infinite detector, normal incidence:
         P(E) = w_K / 2 * (1 - 1/r_K) * [1 - (mu_K / mu_E) * ln(1 + mu_E / mu_K)]
     above the detector's K edge and 0 below it, with w_K its K fluorescence yield, r_K its K
-    edge jump ratio, and mu_E, mu_K its photoabsorption at E and at its own Ka energy. For a
-    Si detector P is about 0.9 % at Ca Ka (3.69 keV) and 0.09 % at 10.5 keV.
+    edge jump ratio, and mu_E, mu_K its photoabsorption at E and at its own Ka energy (Henke).
+    For a Si detector P is about 0.9 % at Ca Ka (3.69 keV) and 0.09 % at 10.5 keV. For Ge, all
+    K fluorescence is put on its Ka energy: a Kb escape (1.1 keV lower still) is not separate.
 
-    Accepts a float, a numpy array or a torch tensor and returns the same kind.
+    Accepts a float, a numpy array or a torch tensor and returns the same kind (floating).
     """
     import numpy as np
 
     if detector_type not in _ESCAPE_LINE:
         raise ValueError(f"no escape physics for detector type {detector_type!r}")
-    table = _ESCAPE_TABLES.get(detector_type)
+    name, e_ka = _ESCAPE_LINE[detector_type]
+    info = next(e for e in elem_info if e.name == name)
+    key = (detector_type, info.yieldD["k"], info.jump["K"], info.bindingE["K"], info.mass)
+    table = _ESCAPE_TABLES.get(key)
     if table is None:
-        name, e_ka = _ESCAPE_LINE[detector_type]
-        info = next(e for e in elem_info if e.name == name)
         edge = info.bindingE["K"]
-        grid = np.geomspace(edge * (1 + 1e-6), 200.0, 4000)
-        mu_e = _photoabsorption(name, grid, elem_info)
-        mu_k = float(_photoabsorption(name, e_ka, elem_info))
-        x = mu_k / mu_e
+        grid = np.geomspace(edge * (1 + 1e-9), 200.0, 4000)
+        x = float(_photoabsorption(info, e_ka, "below")) / _photoabsorption(info, grid, "above")
         prob = 0.5 * info.yieldD["k"] * (1.0 - 1.0 / info.jump["K"]) * (1.0 - x * np.log1p(1.0 / x))
         table = (edge, np.log(grid), prob)
-        _ESCAPE_TABLES[detector_type] = table
+        _ESCAPE_TABLES[key] = table
     edge, log_grid, prob = table
 
     def on_grid(e):
         e = np.asarray(e, dtype=np.float64)
+        if np.any(e > 200.0):
+            raise ValueError("escape_probability covers energies up to 200 keV")
         out = np.interp(np.log(np.clip(e, 1e-3, None)), log_grid, prob)
         return np.where(e > edge, out, 0.0)
 
     if isinstance(energy, torch.Tensor):
         values = on_grid(energy.detach().cpu().numpy())
-        return torch.as_tensor(values, dtype=energy.dtype, device=energy.device)
+        dtype = energy.dtype if energy.is_floating_point() else torch.float64
+        return torch.as_tensor(values, dtype=dtype, device=energy.device)
     values = on_grid(energy)
     return float(values) if np.ndim(values) == 0 else values
 
 
-def escape_peak(spectra, ev, escape_factor, device, detector_type="Si", escape_model="constant"):
+def escape_peak(
+    spectra,
+    ev,
+    escape_factor,
+    device,
+    detector_type="Si",
+    escape_model="constant",
+    elem_info=default_elem_info,
+):
     """Escape copies of `spectra`, each channel moved down by the detector's Ka energy.
 
-    escape_model "constant" (XRF-Maps' settings): every peak loses the same fraction,
-    `escape_factor`, at every energy. "physical": the fraction follows the detector's physics,
-    `escape_factor` * escape_probability(E), so 1.0 is the physical strength (about tenfold
-    weaker at 10.5 keV than at 3.7 keV in Si).
+    escape_model "constant" (XRF-Maps' settings): a copy of every peak at `escape_factor` of its
+    height, the same at every energy. "physical": the copy follows the detector's physics; a
+    peak's full-energy counts at E keep 1 - P(E) of the photons absorbed, the copy holds P(E)
+    (escape_probability), so the copy is `escape_factor` * P / (1 - P) of the peak and 1.0 is
+    the physical strength (in Si about tenfold weaker at 10.5 keV than at 3.7 keV).
     """
     if escape_model not in ("constant", "physical"):
         raise ValueError(f"escape_model must be 'constant' or 'physical', not {escape_model!r}")
@@ -287,7 +307,8 @@ def escape_peak(spectra, ev, escape_factor, device, detector_type="Si", escape_m
     idx_safe = torch.clamp(idx, 0, n_ch - 1)
     source = spectra
     if escape_model == "physical":
-        source = spectra * escape_probability(ev, detector_type).to(device=spectra.device, dtype=spectra.dtype)
+        prob = escape_probability(ev, detector_type, elem_info).to(device=spectra.device, dtype=spectra.dtype)
+        source = spectra * (prob / (1.0 - prob))
     shifted = torch.gather(source, -1, idx_safe) * escape_factor
 
     out = shifted * mask.to(shifted.dtype)
@@ -391,7 +412,7 @@ def build_model_basis(
     basis = torch.stack(basis_specs, dim=0)
     if escape_factor > 0.0:
         with torch.no_grad():
-            basis = basis + escape_peak(basis, ev, escape_factor, device, detector_type, escape_model)
+            basis = basis + escape_peak(basis, ev, escape_factor, device, detector_type, escape_model, elem_info)
     return basis, basis_names
 
 
@@ -626,6 +647,6 @@ def model_spec(
         with torch.no_grad():
             # Escape reindexes channels via round/gather, so we keep it outside the
             # autograd path until a differentiable surrogate is introduced.
-            escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type, escape_model)
+            escape_spec = escape_peak(agr_spec, ev, escape_factor, device, detector_type, escape_model, elem_info)
             agr_spec.add_(escape_spec)
     return agr_spec
