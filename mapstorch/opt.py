@@ -766,6 +766,7 @@ def solve_mca_amplitudes(
     detector_type="Si",
     escape_factor=0.0,
     escape_model="constant",
+    pixel_background=None,
     progress_bar=True,
     verbose=False,
 ):
@@ -779,6 +780,11 @@ def solve_mca_amplitudes(
         elements_to_fit: Elements/components to include; scatter components are added.
         energy_dim: Which axis of mca_arr is energy/channel (default: 0).
         use_snip: Subtract SNIP background per spectrum before solving amplitudes.
+        pixel_background: Optional (component, shape) from `tied_pixel_background`: each
+            spectrum's background is `shape` (one value per fit channel) times that scatter
+            component's amplitude, fitted with the lines on the raw counts; overrides
+            `use_snip`. For pixels of a few hundred counts, where SNIP of one spectrum finds
+            almost no background and the continuum under each line is counted as the line.
         amp_method: "ridge", "lstsq", or "nnls_pgd" (projected gradient NNLS).
         ridge_lambda: L2 regularization for ridge solve (stabilizes nearly-collinear bases).
         nonneg: If True, clamp negative amplitudes to 0 (simple projection).
@@ -850,9 +856,18 @@ def solve_mca_amplitudes(
     )
     basis = basis.to(device=device, dtype=torch.float32)
     n_comp = basis.shape[0]
-    use_full_spectrum_snip = _resolve_bool_param(
-        params_device.get("SNIP_USE_FULL_SPECTRUM", 1.0), default=True
-    )
+    if pixel_background is not None:
+        carrier, shape = pixel_background
+        if carrier not in basis_names:
+            raise ValueError(f"pixel_background carrier {carrier!r} is not a fitted component")
+        shape = torch.as_tensor(np.asarray(shape), device=device, dtype=torch.float32)
+        if shape.shape != (n_ch,):
+            raise ValueError(
+                f"pixel_background shape has {tuple(shape.shape)} values for {n_ch} fit channels"
+            )
+        basis = basis.clone()
+        basis[list(basis_names).index(carrier)] += shape
+        use_snip = False  # each spectrum's background is fitted with its lines
 
     if amp_method not in ("ridge", "lstsq", "nnls_pgd"):
         raise ValueError('amp_method must be "ridge", "lstsq", or "nnls_pgd"')
@@ -895,25 +910,7 @@ def solve_mca_amplitudes(
         y = spectra[start:stop]
 
         if use_snip:
-            with torch.no_grad():
-                bkg = snip_bkg(
-                    spectra_full[start:stop] if use_full_spectrum_snip else y,
-                    energy_range,
-                    params_device["ENERGY_OFFSET"],
-                    params_device["ENERGY_SLOPE"],
-                    params_device["ENERGY_QUADRATIC"],
-                    params_device["SNIP_WIDTH"],
-                    params_device["FWHM_OFFSET"],
-                    params_device["FWHM_FANOPRIME"],
-                    device=device,
-                    use_single_log=params_device["SNIP_USE_SINGLE_LOG"],
-                    use_fwhm_width=params_device["SNIP_USE_FWHM_WIDTH"],
-                    use_full_spectrum=use_full_spectrum_snip,
-                    fwhm_fano_coeff=params_device.get(
-                        "FWHM_FANO_COEFF", default_param_vals["FWHM_FANO_COEFF"]
-                    ),
-                )
-            y = y - bkg
+            y = y - _snip_fit_range(spectra_full[start:stop], energy_range, params_device, device)
 
         if amp_method == "ridge":
             ybt = y @ basis.T
@@ -961,6 +958,206 @@ def solve_mca_amplitudes(
 
     amps = amps.reshape(*map_shape, n_comp)
     return amps.detach().cpu().numpy(), basis_names
+
+
+def _snip_fit_range(spectra_full, energy_range, params_device, device):
+    """SNIP background of each full-length spectrum (N, channels) over the fit range."""
+    use_full = _resolve_bool_param(params_device.get("SNIP_USE_FULL_SPECTRUM", 1.0), default=True)
+    lo, hi = int(energy_range[0]), int(energy_range[1])
+    with torch.no_grad():
+        return snip_bkg(
+            spectra_full if use_full else spectra_full[:, lo : hi + 1],
+            energy_range,
+            params_device["ENERGY_OFFSET"],
+            params_device["ENERGY_SLOPE"],
+            params_device["ENERGY_QUADRATIC"],
+            params_device["SNIP_WIDTH"],
+            params_device["FWHM_OFFSET"],
+            params_device["FWHM_FANOPRIME"],
+            device=device,
+            use_single_log=params_device["SNIP_USE_SINGLE_LOG"],
+            use_fwhm_width=params_device["SNIP_USE_FWHM_WIDTH"],
+            use_full_spectrum=use_full,
+            fwhm_fano_coeff=params_device.get(
+                "FWHM_FANO_COEFF", default_param_vals["FWHM_FANO_COEFF"]
+            ),
+        )
+
+
+def _params_on(params, device):
+    return {
+        k: (v.to(device=device) if isinstance(v, torch.Tensor)
+            else torch.tensor(float(v), device=device, dtype=torch.float32))
+        for k, v in params.items()
+    }
+
+
+# Scatter components that may carry a tied background, in order of preference.
+TIED_BACKGROUND_CARRIERS = ("COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE")
+# How much worse (Poisson deviance below 0.9 of the beam energy) the tied background may fit a
+# scan's sampled spectra than SNIP of each spectrum before the scan keeps SNIP of each spectrum.
+# The tie is for faint pixels, where SNIP of one pixel finds no background; at many counts per
+# pixel SNIP finds it, and one shape for the whole scan becomes the larger error. Synthetic scan,
+# two continuum shapes, Zn summed over pixels over planted, tie against SNIP of each pixel, and
+# the deviance ratio: 300 counts per pixel 0.99 against 1.90, ratio 0.77; 50,000 counts 0.94
+# against 1.10, 1.14; 100,000 counts 0.94 against 1.04, 1.60. On measured scans the ratio stays
+# near or below 1 where the tie helps.
+TIED_BACKGROUND_GUARD = 1.15
+
+
+def _peak_inside(row, margin=3):
+    return row.max() > 0 and margin <= int(row.argmax()) < len(row) - margin
+
+
+def tied_pixel_background(
+    spectrum,
+    energy_range,
+    params,
+    *,
+    elements_to_fit=default_fitting_elems,
+    amp_method="nnls_pgd",
+    ridge_lambda=0.0,
+    nnls_max_iter=2000,
+    device="cpu",
+    e_consts=default_energy_consts,
+    elem_info=default_elem_info,
+    detector_type="Si",
+    escape_factor=0.0,
+    escape_model="constant",
+):
+    """A scan's background for its per-pixel fits, from its summed spectrum, for
+    `solve_mca_amplitudes(..., pixel_background=...)`.
+
+    A pixel of a few hundred counts spread over about a thousand channels has most channels
+    empty: SNIP of that one spectrum finds next to no background, and the continuum under each
+    line is counted as the line (on low-concentration tissue scans, roughly a tenth of a trace
+    element's map; on a synthetic scan at 300 counts per pixel, Zn 1.8 times planted). The
+    continuum comes mostly from scattered photons, so it is tied to a scatter peak: the summed
+    spectrum's SNIP background per unit amplitude of that peak in the summed fit is added to the
+    peak's component, and each pixel's background is that shape times its own scatter
+    amplitude, with no new free amplitude per pixel.
+
+    The carrier is the Compton peak, or the elastic peak when no Compton peak with counts has
+    its maximum inside the fit range (elastic scatter also holds diffraction from crystalline
+    grains, which changes pixel to pixel without the continuum, so it is the second choice).
+    One shape holds for the whole scan, so check it with `guard_tied_background` before use.
+
+    Returns (component name, shape over the fit range), or None when the summed spectrum has
+    no background or no scatter peak can carry it.
+    """
+    spec = torch.as_tensor(np.asarray(spectrum, dtype=np.float32)).reshape(1, -1)
+    common = dict(
+        elements_to_fit=elements_to_fit,
+        e_consts=e_consts,
+        elem_info=elem_info,
+        detector_type=detector_type,
+        escape_factor=escape_factor,
+        escape_model=escape_model,
+    )
+    amps, names = solve_mca_amplitudes(
+        spec, energy_range, params, energy_dim=-1, use_snip=True, amp_method=amp_method,
+        ridge_lambda=ridge_lambda, nnls_max_iter=nnls_max_iter, return_log10=False,
+        device=device, progress_bar=False, **common,
+    )
+    amps, names = amps[0].astype(np.float64), list(names)
+    params_device = _params_on(params, torch.device("cpu"))
+    with torch.no_grad():
+        basis, _ = build_model_basis(params_device, energy_range, device="cpu", **common)
+        background = _snip_fit_range(spec, energy_range, params_device, "cpu")[0]
+    basis = basis.numpy().astype(np.float64)
+    background = background.numpy().astype(np.float64)
+    peaks = {
+        name: amps[k] * basis[k].sum()
+        for k, name in enumerate(names)
+        if name in TIED_BACKGROUND_CARRIERS and _peak_inside(basis[k])
+    }
+    carrier = next((n for n in TIED_BACKGROUND_CARRIERS if peaks.get(n, 0.0) > 0), None)
+    if carrier is None or not background.sum() > 0:
+        return None
+    return carrier, background / amps[names.index(carrier)]
+
+
+def _poisson_deviance(counts, mu):
+    mu = np.maximum(mu, 1e-9)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        term = np.where(counts > 0, counts * np.log(np.where(counts > 0, counts, 1.0) / mu), 0.0)
+    return 2.0 * (term - (counts - mu))
+
+
+def guard_tied_background(
+    pixel_background,
+    spectra,
+    energy_range,
+    params,
+    *,
+    elements_to_fit=default_fitting_elems,
+    amp_method="nnls_pgd",
+    ridge_lambda=0.0,
+    nnls_max_iter=200,
+    threshold=TIED_BACKGROUND_GUARD,
+    device="cpu",
+    e_consts=default_energy_consts,
+    elem_info=default_elem_info,
+    detector_type="Si",
+    escape_factor=0.0,
+    escape_model="constant",
+):
+    """Keep a tied background (`tied_pixel_background`) only where it fits the scan's own
+    spectra about as well as SNIP of each spectrum.
+
+    `spectra` (N, channels) holds raw counts of a sample of the scan's pixels, such as a few
+    thousand from evenly spaced rows. Both models are fitted to them with the same solver and
+    scored by Poisson deviance over the fit range below 0.9 of the beam energy (above it the
+    scatter peaks dominate). Returns the tie or None (keep SNIP of each spectrum), and the tie's
+    deviance over SNIP's, None when it could not be scored (no tie, no usable spectrum, or no
+    channel below that energy). A tie that fits worse than `threshold` does not describe that
+    scan's continuum, as on bright scans where SNIP of each spectrum already finds it.
+    """
+    if pixel_background is None:
+        return None, None
+    spectra = np.asarray(spectra, dtype=np.float32)
+    spectra = spectra[np.isfinite(spectra).all(axis=1)]
+    lo, hi = int(energy_range[0]), int(energy_range[1])
+    value = {
+        k: float(np.asarray(params[k].detach().cpu() if isinstance(params[k], torch.Tensor)
+                            else params[k]).reshape(-1)[0])
+        for k in ("ENERGY_OFFSET", "ENERGY_SLOPE", "ENERGY_QUADRATIC", "COHERENT_SCT_ENERGY")
+    }
+    ch = np.arange(lo, hi + 1, dtype=np.float64)
+    energy = value["ENERGY_OFFSET"] + value["ENERGY_SLOPE"] * ch + value["ENERGY_QUADRATIC"] * ch**2
+    window = energy < 0.9 * value["COHERENT_SCT_ENERGY"]
+    if not len(spectra) or not window.any():
+        return pixel_background, None
+    common = dict(
+        elements_to_fit=elements_to_fit,
+        e_consts=e_consts,
+        elem_info=elem_info,
+        detector_type=detector_type,
+        escape_factor=escape_factor,
+        escape_model=escape_model,
+    )
+    solve = dict(
+        energy_dim=-1, amp_method=amp_method, ridge_lambda=ridge_lambda,
+        nnls_max_iter=nnls_max_iter, return_log10=False, device=device, progress_bar=False,
+    )
+    a, names = solve_mca_amplitudes(spectra, energy_range, params, use_snip=True, **solve, **common)
+    b, _ = solve_mca_amplitudes(
+        spectra, energy_range, params, pixel_background=pixel_background, **solve, **common
+    )
+    params_device = _params_on(params, torch.device("cpu"))
+    with torch.no_grad():
+        basis, _ = build_model_basis(params_device, energy_range, device="cpu", **common)
+        snip = _snip_fit_range(torch.as_tensor(spectra), energy_range, params_device, "cpu")
+    basis = basis.numpy().astype(np.float64)
+    carried = basis.copy()
+    carried[list(names).index(pixel_background[0])] += np.asarray(pixel_background[1])
+    y = spectra[:, lo : hi + 1].astype(np.float64)
+    today = _poisson_deviance(y, a.astype(np.float64) @ basis + snip.numpy())[:, window].sum()
+    tied = _poisson_deviance(y, b.astype(np.float64) @ carried)[:, window].sum()
+    if not (np.isfinite(today) and np.isfinite(tied)):
+        return pixel_background, None
+    ratio = float(tied / today) if today > 0 else (float("inf") if tied > 0 else 1.0)
+    return (pixel_background if ratio <= threshold else None), ratio
 
 
 def fit_mca_arr(
