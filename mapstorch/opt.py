@@ -1175,7 +1175,8 @@ def guard_tied_background(
     if not all(np.isfinite([today, tied, carrier_today, carrier_tied])):
         return None, None, None
     ratio, carrier = _ratio(tied, today), _ratio(carrier_tied, carrier_today)
-    keep = ratio <= threshold and carrier <= carrier_threshold
+    finite = np.isfinite([ratio, carrier]).all()
+    keep = finite and ratio <= threshold and carrier <= carrier_threshold
     return (pixel_background if keep else None), ratio, carrier
 
 
