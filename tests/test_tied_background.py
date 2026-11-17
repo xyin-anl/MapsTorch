@@ -13,7 +13,13 @@ import torch
 
 from mapstorch.default import default_param_vals
 from mapstorch.map import build_model_basis
-from mapstorch.opt import guard_tied_background, solve_mca_amplitudes, tied_pixel_background
+from mapstorch.opt import (
+    TIED_BACKGROUND_GUARD,
+    TIED_CARRIER_GUARD,
+    guard_tied_background,
+    solve_mca_amplitudes,
+    tied_pixel_background,
+)
 
 E0 = 10.57  # keV
 LO, HI = 100, 1100  # 1-11 keV at 10 eV per channel
@@ -30,11 +36,13 @@ def _params():
     return {k: torch.tensor(float(v)) for k, v in values.items()}
 
 
-def _scan(params, n_pixels, counts, seed, flat_half=False):
+def _scan(params, n_pixels, counts, seed, flat_half=False, scatter=1.0, missing=None):
     """Poisson spectra (pixels, 2048) and the planted counts per component. The continuum rises
     toward the Compton peak with a low-energy shoulder (a shape SNIP does not make), is about a
     fifth of the counts, and follows each pixel's density within +-40 %. With `flat_half`, half
-    the pixels have a flatter continuum (another material)."""
+    the pixels have a flatter continuum (another material). `scatter` scales both scatter peaks;
+    `missing` (element, strength) adds that element's lines, `strength` times all other lines'
+    counts, to the data but not to the fit's element list."""
     with torch.no_grad():
         basis, names = build_model_basis(params, (LO, HI), elements_to_fit=ELEMENTS)
     basis, names = basis.numpy().astype(np.float64), [str(n) for n in names]
@@ -42,10 +50,17 @@ def _scan(params, n_pixels, counts, seed, flat_half=False):
     e = np.arange(LO, HI + 1) * 0.01
     shape = 0.4 * np.exp((e - 10.0) / 1.2) + 0.03 * np.exp(-(((e - 2.0) / 1.5) ** 2)) + 0.01
     density = rng.gamma(4, 0.25, n_pixels)
-    unit = np.array([MEAN.get(n, 0.0) for n in names])
+    weight = {"COMPTON_AMPLITUDE": scatter, "COHERENT_SCT_AMPLITUDE": scatter}
+    unit = np.array([MEAN.get(n, 0.0) * weight.get(n, 1.0) for n in names])
     unit = unit / np.where(basis.sum(axis=1) > 0, basis.sum(axis=1), 1.0)
     amplitudes = density[:, None] * unit[None, :]
     lines = amplitudes @ basis
+    if missing is not None:
+        with torch.no_grad():
+            extra, extra_names = build_model_basis(params, (LO, HI), elements_to_fit=[missing[0]])
+        row = extra.numpy()[[str(n) for n in extra_names].index(missing[0])].astype(np.float64)
+        per_pixel = density * missing[1] * lines.sum() / density.sum()
+        lines = lines + np.outer(per_pixel, row / row.sum())
     continuum = (density * rng.uniform(0.6, 1.4, n_pixels))[:, None] * shape[None, :]
     if flat_half:
         flat = 0.2 * np.exp((e - 10.0) / 2.5) + 0.02
@@ -75,7 +90,7 @@ class TiedBackgroundTests(unittest.TestCase):
         tie = tied_pixel_background(spectra.sum(axis=0), (LO, HI), params, **SOLVER)
         self.assertIsNotNone(tie)
         self.assertEqual(tie[0], "COMPTON_AMPLITUDE")
-        kept, ratio = guard_tied_background(tie, spectra[::3], (LO, HI), params, **SOLVER)
+        kept, ratio, _ = guard_tied_background(tie, spectra[::3], (LO, HI), params, **SOLVER)
         self.assertIs(kept, tie, ratio)
         with self.assertRaises(ValueError):  # nothing to score is no licence to keep the tie
             guard_tied_background(tie, np.full_like(spectra[:5], np.nan), (LO, HI), params)
@@ -90,10 +105,27 @@ class TiedBackgroundTests(unittest.TestCase):
         spectra, planted, basis, names = _scan(params, 2000, 300_000, seed=2, flat_half=True)
         tie = tied_pixel_background(spectra.sum(axis=0), (LO, HI), params, **SOLVER)
         self.assertIsNotNone(tie)
-        kept, ratio = guard_tied_background(tie, spectra[::4], (LO, HI), params, **SOLVER)
+        kept, ratio, _ = guard_tied_background(tie, spectra[::4], (LO, HI), params, **SOLVER)
         self.assertIsNone(kept, ratio)
         snip = _summed(params, spectra, basis, names, kept)
         self.assertAlmostEqual(snip["Zn"] / planted["Zn"], 1.0, delta=0.04)
+
+    def test_a_line_missing_from_the_element_list_does_not_swell_the_background(self):
+        """Fails if a peak the fit has no line for is taken into the tied background: least
+        squares scales the carrier's row (its peak plus the background shape) up to cover it, and
+        the background under every line grows with it, while the deviance ratio alone would keep
+        the tie. The guard must keep SNIP of each spectrum, and the trace Zn must survive."""
+        params = _params()
+        spectra, planted, basis, names = _scan(
+            params, 2000, 3000, seed=4, scatter=0.2, missing=("La_L", 3.0)
+        )
+        tie = tied_pixel_background(spectra.sum(axis=0), (LO, HI), params, **SOLVER)
+        self.assertIsNotNone(tie)
+        kept, ratio, carrier = guard_tied_background(tie, spectra[::4], (LO, HI), params, **SOLVER)
+        self.assertLessEqual(ratio, TIED_BACKGROUND_GUARD)
+        self.assertGreater(carrier, TIED_CARRIER_GUARD)
+        self.assertIsNone(kept)
+        self.assertGreater(_summed(params, spectra, basis, names, kept)["Zn"] / planted["Zn"], 0.8)
 
 
 if __name__ == "__main__":

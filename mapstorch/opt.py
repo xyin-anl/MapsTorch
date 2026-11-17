@@ -1003,6 +1003,15 @@ TIED_BACKGROUND_CARRIERS = ("COMPTON_AMPLITUDE", "COHERENT_SCT_AMPLITUDE")
 # against 1.10, 1.14; 100,000 counts 0.94 against 1.04, 1.60. On measured scans the ratio stays
 # near or below 1 where the tie helps.
 TIED_BACKGROUND_GUARD = 1.15
+# How much more the carrier may hold, summed over the sampled spectra, fitted with the tie than with
+# SNIP of each spectrum. With the tie the carrier's component is its peak plus the background, and
+# the fit is least squares on raw counts, so a peak that no line in the list explains is covered
+# by scaling that component up; the background under every line grows with it. Synthetic film with
+# weak scatter and La L lines missing from the list: carrier 1.39 times, Zn 0.15 of planted, Ca
+# 0.89, while the deviance ratio (0.69) alone would keep the tie. On 55 development scans from
+# seven instruments, 47 with a tie were at or below 1.15 and the next six at 1.35-8.8: the threshold
+# sits in that gap.
+TIED_CARRIER_GUARD = 1.2
 
 
 def _peak_inside(row, margin=3):
@@ -1095,6 +1104,7 @@ def guard_tied_background(
     ridge_lambda=0.0,
     nnls_max_iter=200,
     threshold=TIED_BACKGROUND_GUARD,
+    carrier_threshold=TIED_CARRIER_GUARD,
     device="cpu",
     e_consts=default_energy_consts,
     elem_info=default_elem_info,
@@ -1103,19 +1113,22 @@ def guard_tied_background(
     escape_model="constant",
 ):
     """Keep a tied background (`tied_pixel_background`) only where it fits the scan's own
-    spectra about as well as SNIP of each spectrum.
+    spectra about as well as SNIP of each spectrum and its carrier still holds only its peak.
 
     `spectra` (N, channels) holds raw counts of a sample of the scan's pixels, such as a few
     thousand from evenly spaced rows. Both models are fitted to them with the same solver and
     scored by Poisson deviance over the fit range below 0.9 of the beam energy (above it the
-    scatter peaks dominate). Returns the tie or None (keep SNIP of each spectrum), and the tie's
-    deviance over SNIP's. A tie that fits worse than `threshold` does not describe that scan's
-    continuum, as on bright scans where SNIP of each spectrum already finds it. A comparison that
-    cannot be scored (no channel below that energy, or a non-finite deviance) keeps SNIP, with
-    ratio None; a sample with no finite spectrum is an error.
+    scatter peaks dominate), and the carrier's amplitude summed over them is compared both ways.
+    Returns the tie or None (keep SNIP of each spectrum), the tie's deviance over SNIP's, and that
+    carrier ratio. A tie that fits worse than `threshold` does not describe that scan's continuum,
+    as on bright scans where SNIP of each spectrum already finds it; a carrier above
+    `carrier_threshold` has taken in counts that are not its peak's, such as a peak missing from
+    the element list, and would subtract that much more background under every line. A comparison
+    that cannot be scored (no channel below that energy, or a non-finite score) keeps SNIP, with
+    ratios None; a sample with no finite spectrum is an error.
     """
     if pixel_background is None:
-        return None, None
+        return None, None, None
     spectra = np.asarray(spectra, dtype=np.float32)
     spectra = spectra[np.isfinite(spectra).all(axis=1)]
     if not len(spectra):
@@ -1130,7 +1143,7 @@ def guard_tied_background(
     energy = value["ENERGY_OFFSET"] + value["ENERGY_SLOPE"] * ch + value["ENERGY_QUADRATIC"] * ch**2
     window = energy < 0.9 * value["COHERENT_SCT_ENERGY"]
     if not window.any():
-        return None, None
+        return None, None, None
     common = dict(
         elements_to_fit=elements_to_fit,
         e_consts=e_consts,
@@ -1152,15 +1165,22 @@ def guard_tied_background(
         basis, _ = build_model_basis(params_device, energy_range, device="cpu", **common)
         snip = _snip_fit_range(torch.as_tensor(spectra), energy_range, params_device, "cpu")
     basis = basis.numpy().astype(np.float64)
+    k = list(names).index(pixel_background[0])
     carried = basis.copy()
-    carried[list(names).index(pixel_background[0])] += np.asarray(pixel_background[1])
+    carried[k] += np.asarray(pixel_background[1])
     y = spectra[:, lo : hi + 1].astype(np.float64)
     today = _poisson_deviance(y, a.astype(np.float64) @ basis + snip.numpy())[:, window].sum()
     tied = _poisson_deviance(y, b.astype(np.float64) @ carried)[:, window].sum()
-    if not (np.isfinite(today) and np.isfinite(tied)):
-        return None, None
-    ratio = float(tied / today) if today > 0 else (float("inf") if tied > 0 else 1.0)
-    return (pixel_background if ratio <= threshold else None), ratio
+    carrier_today, carrier_tied = float(a[:, k].sum()), float(b[:, k].sum())
+    if not all(np.isfinite([today, tied, carrier_today, carrier_tied])):
+        return None, None, None
+    ratio, carrier = _ratio(tied, today), _ratio(carrier_tied, carrier_today)
+    keep = ratio <= threshold and carrier <= carrier_threshold
+    return (pixel_background if keep else None), ratio, carrier
+
+
+def _ratio(num, den):
+    return float(num / den) if den > 0 else (float("inf") if num > 0 else 1.0)
 
 
 def fit_mca_arr(
