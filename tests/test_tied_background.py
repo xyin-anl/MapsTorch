@@ -77,6 +77,8 @@ class TiedBackgroundTests(unittest.TestCase):
         self.assertEqual(tie[0], "COMPTON_AMPLITUDE")
         kept, ratio = guard_tied_background(tie, spectra[::3], (LO, HI), params, **SOLVER)
         self.assertIs(kept, tie, ratio)
+        with self.assertRaises(ValueError):  # nothing to score is no licence to keep the tie
+            guard_tied_background(tie, np.full_like(spectra[:5], np.nan), (LO, HI), params)
         tied = _summed(params, spectra, basis, names, kept)
         for element in ("Ca", "Fe", "Zn"):
             self.assertAlmostEqual(tied[element] / planted[element], 1.0, delta=0.06, msg=element)

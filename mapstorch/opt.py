@@ -1109,14 +1109,17 @@ def guard_tied_background(
     thousand from evenly spaced rows. Both models are fitted to them with the same solver and
     scored by Poisson deviance over the fit range below 0.9 of the beam energy (above it the
     scatter peaks dominate). Returns the tie or None (keep SNIP of each spectrum), and the tie's
-    deviance over SNIP's, None when it could not be scored (no tie, no usable spectrum, or no
-    channel below that energy). A tie that fits worse than `threshold` does not describe that
-    scan's continuum, as on bright scans where SNIP of each spectrum already finds it.
+    deviance over SNIP's. A tie that fits worse than `threshold` does not describe that scan's
+    continuum, as on bright scans where SNIP of each spectrum already finds it. A comparison that
+    cannot be scored (no channel below that energy, or a non-finite deviance) keeps SNIP, with
+    ratio None; a sample with no finite spectrum is an error.
     """
     if pixel_background is None:
         return None, None
     spectra = np.asarray(spectra, dtype=np.float32)
     spectra = spectra[np.isfinite(spectra).all(axis=1)]
+    if not len(spectra):
+        raise ValueError("guard_tied_background needs at least one finite spectrum to score")
     lo, hi = int(energy_range[0]), int(energy_range[1])
     value = {
         k: float(np.asarray(params[k].detach().cpu() if isinstance(params[k], torch.Tensor)
@@ -1126,8 +1129,8 @@ def guard_tied_background(
     ch = np.arange(lo, hi + 1, dtype=np.float64)
     energy = value["ENERGY_OFFSET"] + value["ENERGY_SLOPE"] * ch + value["ENERGY_QUADRATIC"] * ch**2
     window = energy < 0.9 * value["COHERENT_SCT_ENERGY"]
-    if not len(spectra) or not window.any():
-        return pixel_background, None
+    if not window.any():
+        return None, None
     common = dict(
         elements_to_fit=elements_to_fit,
         e_consts=e_consts,
@@ -1155,7 +1158,7 @@ def guard_tied_background(
     today = _poisson_deviance(y, a.astype(np.float64) @ basis + snip.numpy())[:, window].sum()
     tied = _poisson_deviance(y, b.astype(np.float64) @ carried)[:, window].sum()
     if not (np.isfinite(today) and np.isfinite(tied)):
-        return pixel_background, None
+        return None, None
     ratio = float(tied / today) if today > 0 else (float("inf") if tied > 0 else 1.0)
     return (pixel_background if ratio <= threshold else None), ratio
 
